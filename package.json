@@ -15,7 +15,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "package": "echo 'packaging is added in a later task'",
-    "gen:icons": "bun scripts/gen-icons.ts"
+    "gen:icons": "bun scripts/gen-icons.ts",
+    "mock-api": "bun scripts/mock-api.ts"
   },
   "dependencies": {
     "preact": "^10.29.2"
