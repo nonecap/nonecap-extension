@@ -22,6 +22,7 @@ export type PillHandle = {
   destroy(): void;
 };
 
+/** Fallback when offsetHeight is 0 (pre-layout / jsdom) — keep in sync with the `.nc-pill` height in pill.css. */
 const PILL_HEIGHT = 38;
 const ANCHOR_GAP = 10;
 const VIEWPORT_MARGIN = 8;
@@ -52,6 +53,7 @@ export function createPill(doc: Document, opts: { onCta?: () => void } = {}): Pi
   shadow.appendChild(style);
   const pill = doc.createElement('div');
   pill.className = 'nc-pill';
+  pill.setAttribute('role', 'status');
   shadow.appendChild(pill);
   (doc.body ?? doc.documentElement).appendChild(host);
 
@@ -70,6 +72,11 @@ export function createPill(doc: Document, opts: { onCta?: () => void } = {}): Pi
 
   // ---- positioning: float just above (else below) the checkbox widget ------
 
+  /** Rendered pill height; the design constant as pre-layout fallback. */
+  function pillHeight(): number {
+    return host.offsetHeight || PILL_HEIGHT;
+  }
+
   function reposition(): void {
     if (host.style.display === 'none') return;
     const rect = anchor?.isConnected ? anchor.getBoundingClientRect() : null;
@@ -79,8 +86,12 @@ export function createPill(doc: Document, opts: { onCta?: () => void } = {}): Pi
       host.style.right = '16px';
       return;
     }
-    const above = rect.top - PILL_HEIGHT - ANCHOR_GAP;
-    const top = above >= VIEWPORT_MARGIN ? above : rect.bottom + ANCHOR_GAP;
+    const height = pillHeight();
+    const above = rect.top - height - ANCHOR_GAP;
+    // Prefer above the widget; flip below when there is no room, clamped so
+    // the pill never leaves the bottom of the viewport.
+    const below = Math.min(rect.bottom + ANCHOR_GAP, win.innerHeight - height - VIEWPORT_MARGIN);
+    const top = above >= VIEWPORT_MARGIN ? above : below;
     host.style.top = `${Math.max(VIEWPORT_MARGIN, top)}px`;
     host.style.right = `${Math.max(VIEWPORT_MARGIN, win.innerWidth - rect.right)}px`;
   }

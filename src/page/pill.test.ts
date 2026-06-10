@@ -26,6 +26,30 @@ function statusText(): string | null {
   return shadow().querySelector('.p-status')?.textContent ?? null;
 }
 
+type RectInit = { x?: number; y?: number; width?: number; height?: number };
+
+function makeAnchor(init: RectInit): HTMLElement {
+  const x = init.x ?? 0;
+  const y = init.y ?? 0;
+  const width = init.width ?? 0;
+  const height = init.height ?? 0;
+  const el = document.createElement('div');
+  el.getBoundingClientRect = () =>
+    ({
+      x,
+      y,
+      width,
+      height,
+      top: y,
+      left: x,
+      right: x + width,
+      bottom: y + height,
+      toJSON: () => ({}),
+    }) as DOMRect;
+  document.body.appendChild(el);
+  return el;
+}
+
 beforeEach(() => {
   document.body.innerHTML = '';
 });
@@ -139,6 +163,51 @@ describe('setVisible', () => {
     p.setVisible(true);
     expect(host().style.display).not.toBe('none');
     expect(statusText()).toBe('Solving');
+  });
+});
+
+// jsdom: host.offsetHeight is 0, so the PILL_HEIGHT=38 fallback applies;
+// the viewport defaults to 1024x768. render() repositions synchronously, so
+// driving setPhase after setAnchor avoids waiting on the rAF/setTimeout path.
+describe('reposition', () => {
+  it('floats above the anchor, right-aligned to its right edge', () => {
+    const p = makePill();
+    p.setAnchor(makeAnchor({ x: 100, y: 300, width: 300, height: 74 }));
+    p.setPhase('solving');
+    expect(host().style.top).toBe('252px'); // 300 - 38 - 10
+    expect(host().style.right).toBe('624px'); // 1024 - (100 + 300)
+  });
+
+  it('flips below the anchor when there is no room above', () => {
+    const p = makePill();
+    p.setAnchor(makeAnchor({ x: 50, y: 20, width: 300, height: 74 }));
+    p.setPhase('solving');
+    expect(host().style.top).toBe('104px'); // 20 + 74 + 10
+    expect(host().style.right).toBe('674px'); // 1024 - (50 + 300)
+  });
+
+  it('clamps the below-flip to the bottom of the viewport', () => {
+    const p = makePill();
+    p.setAnchor(makeAnchor({ x: 0, y: 10, width: 300, height: 900 }));
+    p.setPhase('solving');
+    expect(host().style.top).toBe('722px'); // 768 - 38 - 8, not 10+900+10
+  });
+
+  it('parks top-right when the anchor is zero-area or disconnected', () => {
+    const p = makePill();
+    p.setAnchor(makeAnchor({ x: 100, y: 300, width: 0, height: 0 }));
+    p.setPhase('solving');
+    expect(host().style.top).toBe('16px');
+    expect(host().style.right).toBe('16px');
+
+    const anchor = makeAnchor({ x: 100, y: 300, width: 300, height: 74 });
+    p.setAnchor(anchor);
+    p.setPhase('solving');
+    expect(host().style.top).toBe('252px');
+    anchor.remove();
+    p.setPhase('verifying');
+    expect(host().style.top).toBe('16px');
+    expect(host().style.right).toBe('16px');
   });
 });
 

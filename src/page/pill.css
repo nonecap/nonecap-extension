@@ -14,7 +14,7 @@
   display: flex;
   align-items: center;
   gap: 9px;
-  height: 38px;
+  height: 38px; /* PILL_HEIGHT fallback in pill.ts — keep in sync */
   padding: 0 14px 0 10px;
   border-radius: 19px;
   background: #131318;
