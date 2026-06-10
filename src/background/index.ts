@@ -22,7 +22,7 @@ import {
 import { get, getAll, set, updateSettings } from '../shared/storage';
 import { cropDataUrl } from '../shared/crop';
 import { createSolveLoop, type LoopDeps } from './solve-loop';
-import { createRecognizeBookkeeper, evaluateGate } from './gate';
+import { createRecognizeBookkeeper, evaluateGate, refreshStatsIfStale } from './gate';
 import { setBadgeFlags, wireBadge } from './badge';
 
 // ---------------------------------------------------------------------------
@@ -272,6 +272,10 @@ chrome.runtime.onMessage.addListener(
         }
         return undefined;
       case 'GET_STATE':
+        // Popup open = natural moment to refresh key-user stats. Deliberately
+        // NOT awaited: reply with current state now, the popup's poll picks
+        // up the refreshed numbers via storage on its next tick.
+        void refreshStatsIfStale(() => apiStats()).catch(() => {});
         void assemblePopupState().then(sendResponse, () => sendResponse(IDLE_POPUP_STATE));
         return true;
       case 'SET_PAUSE':

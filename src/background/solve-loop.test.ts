@@ -15,8 +15,16 @@ import {
 type PhaseEvent = { tabId: number; phase: Phase; detail?: { secs?: string; credits?: number } };
 type OutcomeCall = { session: string; result: 'solved' | 'failed'; rounds?: number };
 
-function ok(session: string, tiles: number[] = [1]): RecognizeResult {
-  return { ok: true, data: { action: 'click_tiles', tiles, session } };
+function ok(session: string, tiles: number[] = [1], creditsCharged?: number): RecognizeResult {
+  return {
+    ok: true,
+    data: {
+      action: 'click_tiles',
+      tiles,
+      session,
+      ...(creditsCharged !== undefined ? { credits_charged: creditsCharged } : {}),
+    },
+  };
 }
 
 function err(kind: ApiErrorKind): RecognizeResult {
@@ -161,7 +169,8 @@ describe('createSolveLoop', () => {
       'solved',
       'idle',
     ]);
-    expect(h.phases[4]?.detail).toEqual({ secs: '4.2' });
+    // Free tier meters 1 credit per round → the pill shows "−2 credits".
+    expect(h.phases[4]?.detail).toEqual({ secs: '4.2', credits: 2 });
     expect(loop.getPhase(1)).toBe('idle');
   });
 
@@ -360,9 +369,9 @@ describe('createSolveLoop', () => {
     expect(loop.getPhase(1)).toBe('idle');
   });
 
-  it('watchdog: SOLVED disarms it', async () => {
+  it('watchdog: SOLVED disarms it (and a key-path solve sums credits_charged)', async () => {
     const h = makeHarness();
-    h.queue(ok('s1'));
+    h.queue(ok('s1', [1], 10)); // user-key response: explicit credits_charged
     const loop = createSolveLoop(h.deps);
 
     loop.onChallengeReady(1, 10, 7, 'grid', 'example.com');
@@ -373,6 +382,10 @@ describe('createSolveLoop', () => {
 
     expect(h.outcomes).toEqual([{ session: 's1', result: 'solved', rounds: 1 }]);
     expect(h.phaseNames()).toEqual(['solving', 'verifying', 'solved', 'idle']);
+    expect(h.phases.find((p) => p.phase === 'solved')?.detail).toEqual({
+      secs: '2.0',
+      credits: 10,
+    });
     expect(loop.getPhase(1)).toBe('idle');
   });
 

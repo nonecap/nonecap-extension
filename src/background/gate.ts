@@ -5,8 +5,8 @@
  * the API call + re-registration trigger are injected.
  */
 
-import { get, getAll, set } from '../shared/storage';
-import type { ApiResult, RecognizeData, RecognizePayload } from '../shared/api';
+import { get, getAll, set, type StoredStats } from '../shared/storage';
+import type { ApiResult, RecognizeData, RecognizePayload, StatsData } from '../shared/api';
 
 export type Gate = { proceed: boolean; reason: 'ok' | 'off' | 'no-solves' };
 
@@ -77,4 +77,41 @@ export function createRecognizeBookkeeper(opts: {
     }
     return res;
   };
+}
+
+/**
+ * How long fetched stats stay fresh. Popup opens are the natural refresh
+ * trigger (GET_STATE), so 5 minutes keeps the numbers feeling live while
+ * bounding API chatter for someone who opens the popup constantly.
+ */
+export const STATS_TTL_MS = 5 * 60_000;
+
+/** Pure staleness predicate for the stored monthly stats. */
+export function statsAreStale(stats: StoredStats | null, now: number): boolean {
+  return stats === null || now - stats.fetchedAt > STATS_TTL_MS;
+}
+
+/**
+ * If a userKey is connected and the stored stats are missing/stale, fetch
+ * fresh ones and persist them. Designed to be fired without awaiting from
+ * the GET_STATE handler: the reply carries current state and the popup's
+ * poll picks the refreshed numbers up on its next tick.
+ */
+export async function refreshStatsIfStale(
+  fetchStats: () => Promise<ApiResult<StatsData>>,
+  now: number = Date.now(),
+): Promise<void> {
+  const [userKey, stats] = await Promise.all([get('userKey'), get('stats')]);
+  if (userKey === null) return; // free keys have no stats endpoint
+  if (!statsAreStale(stats, now)) return;
+  const res = await fetchStats();
+  if (!res.ok) return; // keep the old numbers; next popup open retries
+  await set({
+    stats: {
+      monthSolves: res.data.month_solves,
+      monthCreditsSpent: res.data.month_credits_spent,
+      solveRate: res.data.solve_rate,
+      fetchedAt: now,
+    },
+  });
 }

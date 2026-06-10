@@ -1,8 +1,14 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installChromeMock, type ChromeMock } from '../shared/test/chrome-mock';
 import { DEFAULT_SETTINGS, type Settings } from '../shared/settings';
-import type { ApiResult, RecognizeData, RecognizePayload } from '../shared/api';
-import { createRecognizeBookkeeper, evaluateGate } from './gate';
+import type { ApiResult, RecognizeData, RecognizePayload, StatsData } from '../shared/api';
+import {
+  STATS_TTL_MS,
+  createRecognizeBookkeeper,
+  evaluateGate,
+  refreshStatsIfStale,
+  statsAreStale,
+} from './gate';
 
 let mock: ChromeMock;
 
@@ -144,5 +150,95 @@ describe('createRecognizeBookkeeper', () => {
     expect(mock.store['userKey']).toBe('nc_live_x');
     expect(mock.store['extKey']).toBe('nc_ext_y');
     expect(reRegister).not.toHaveBeenCalled();
+  });
+});
+
+describe('statsAreStale', () => {
+  const NOW = 1_000_000_000;
+  const at = (fetchedAt: number) => ({
+    monthSolves: 1,
+    monthCreditsSpent: 10,
+    solveRate: 0.9,
+    fetchedAt,
+  });
+
+  it('null stats are stale', () => {
+    expect(statsAreStale(null, NOW)).toBe(true);
+  });
+
+  it('fresh stats are not stale (TTL boundary inclusive-fresh)', () => {
+    expect(statsAreStale(at(NOW), NOW)).toBe(false);
+    expect(statsAreStale(at(NOW - STATS_TTL_MS), NOW)).toBe(false);
+  });
+
+  it('stats older than the TTL are stale', () => {
+    expect(statsAreStale(at(NOW - STATS_TTL_MS - 1), NOW)).toBe(true);
+  });
+});
+
+describe('refreshStatsIfStale', () => {
+  const NOW = 2_000_000_000;
+  const statsOk: ApiResult<StatsData> = {
+    ok: true,
+    data: { month_solves: 321, month_credits_spent: 3210, solve_rate: 0.97 },
+  };
+
+  it('does nothing without a userKey (free keys have no stats endpoint)', async () => {
+    const fetchStats = vi.fn(async () => statsOk);
+    await refreshStatsIfStale(fetchStats, NOW);
+    expect(fetchStats).not.toHaveBeenCalled();
+    expect(mock.store['stats']).toBeUndefined();
+  });
+
+  it('does nothing while stored stats are fresh', async () => {
+    const fresh = { monthSolves: 1, monthCreditsSpent: 10, solveRate: 0.9, fetchedAt: NOW - 1000 };
+    await chrome.storage.local.set({ userKey: 'nc_live_x', stats: fresh });
+    const fetchStats = vi.fn(async () => statsOk);
+    await refreshStatsIfStale(fetchStats, NOW);
+    expect(fetchStats).not.toHaveBeenCalled();
+    expect(mock.store['stats']).toEqual(fresh);
+  });
+
+  it('fetches and persists when stats are missing', async () => {
+    await chrome.storage.local.set({ userKey: 'nc_live_x' });
+    const fetchStats = vi.fn(async () => statsOk);
+    await refreshStatsIfStale(fetchStats, NOW);
+    expect(fetchStats).toHaveBeenCalledTimes(1);
+    expect(mock.store['stats']).toEqual({
+      monthSolves: 321,
+      monthCreditsSpent: 3210,
+      solveRate: 0.97,
+      fetchedAt: NOW,
+    });
+  });
+
+  it('fetches and persists when stats are older than the TTL', async () => {
+    await chrome.storage.local.set({
+      userKey: 'nc_live_x',
+      stats: { monthSolves: 1, monthCreditsSpent: 10, solveRate: 0.9, fetchedAt: NOW - STATS_TTL_MS - 1 },
+    });
+    await refreshStatsIfStale(vi.fn(async () => statsOk), NOW);
+    expect(mock.store['stats']).toEqual({
+      monthSolves: 321,
+      monthCreditsSpent: 3210,
+      solveRate: 0.97,
+      fetchedAt: NOW,
+    });
+  });
+
+  it('keeps the old numbers when the fetch fails', async () => {
+    const stale = {
+      monthSolves: 1,
+      monthCreditsSpent: 10,
+      solveRate: 0.9,
+      fetchedAt: NOW - STATS_TTL_MS - 1,
+    };
+    await chrome.storage.local.set({ userKey: 'nc_live_x', stats: stale });
+    const fetchStats = vi.fn(
+      async (): Promise<ApiResult<StatsData>> => ({ ok: false, kind: 'network', message: 'down' }),
+    );
+    await refreshStatsIfStale(fetchStats, NOW);
+    expect(fetchStats).toHaveBeenCalledTimes(1);
+    expect(mock.store['stats']).toEqual(stale); // next popup open retries
   });
 });

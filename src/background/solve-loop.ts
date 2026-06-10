@@ -78,6 +78,12 @@ type Attempt = {
   session: string | null;
   /** Completed rounds (a round counts once recognize succeeded). */
   rounds: number;
+  /**
+   * Cumulative credits consumed: free keys meter 1 per round, user keys
+   * report credits_charged per recognize. Shown in the solved pill
+   * ("Solved in Xs · −N credits").
+   */
+  creditsSpent: number;
   token: Token;
 };
 
@@ -302,6 +308,8 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
 
     attempt.session = res.data.session;
     attempt.rounds += 1;
+    // User keys say what each call cost; the free tier meters 1 per round.
+    attempt.creditsSpent += res.data.credits_charged ?? 1;
     if (res.usedFallback) deps.onUserKeyDead?.();
 
     let done = false;
@@ -354,6 +362,7 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
       task,
       session: null,
       rounds: 0,
+      creditsSpent: 0,
       token: { cancelled: false },
     };
     attempts.set(tabId, attempt);
@@ -368,7 +377,7 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
       void deps.outcome({ session: attempt.session, result: 'solved', rounds: attempt.rounds });
     }
     clearAttempt(tabId, attempt);
-    setPhase(tabId, 'solved', { secs: secs.toFixed(1) });
+    setPhase(tabId, 'solved', { secs: secs.toFixed(1), credits: attempt.creditsSpent });
     lingerToIdle(tabId);
   }
 
