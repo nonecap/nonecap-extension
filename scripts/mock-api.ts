@@ -1,12 +1,15 @@
 /**
- * Mock NoneCap extension API for local end-to-end testing.
+ * Mock NoneCap extension API for local end-to-end testing. DEV ONLY —
+ * unauthenticated, binds to 127.0.0.1, never deploy or expose this.
  *
  * Run: bun scripts/mock-api.ts   (or: bun run mock-api)
  * Then point the extension at it: chrome.storage.local.set({ apiBase: 'http://localhost:8787' })
  *
  * The recognize endpoint walks RECOGNIZE_SCRIPT round by round (edit the
  * array to script other flows), validates that the uploaded image is a
- * decodable PNG of at least 100x100, and logs request sizes.
+ * decodable PNG of at least 100x100, and logs request sizes. The script
+ * position (recognizeCalls) only advances — restart the server to reset it
+ * between test runs.
  */
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
@@ -30,7 +33,10 @@ const resetsAt = (): string => {
   return d.toISOString();
 };
 
-/** Scripted recognize responses, consumed in order (last one repeats). */
+/**
+ * Scripted recognize responses, consumed in order (last one repeats).
+ * NOTE: the cursor never rewinds — restart the server to replay from round 1.
+ */
 const RECOGNIZE_SCRIPT: MockRecognizeResponse[] = [
   {
     action: 'click_tiles',
@@ -166,7 +172,7 @@ createServer((req, res) => {
     console.error('[mock] handler error:', err);
     send(res, 500, { error: { code: 'internal', message: 'mock server error' } });
   });
-}).listen(PORT, () => {
-  console.log(`[mock] NoneCap mock API listening on http://localhost:${PORT}`);
+}).listen(PORT, '127.0.0.1', () => {
+  console.log(`[mock] NoneCap mock API (dev only) listening on http://127.0.0.1:${PORT}`);
   console.log(`[mock] point the extension at it: chrome.storage.local.set({ apiBase: 'http://localhost:${PORT}' })`);
 });

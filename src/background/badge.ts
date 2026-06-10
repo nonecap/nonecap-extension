@@ -67,11 +67,13 @@ export function setBadgeFlags(partial: Partial<{ paused: boolean; blocked: boole
  */
 export function wireBadge(paint: BadgePainter): () => void {
   painter = paint;
-  void getAll().then((all) => {
-    snapshot = { credits: all.credits, userKey: all.userKey };
-    repaint();
-  });
-  return subscribe((changes) => {
+  const sync = (): Promise<void> =>
+    getAll().then((all) => {
+      snapshot = { credits: all.credits, userKey: all.userKey };
+      repaint();
+    });
+  void sync();
+  const unsubscribe = subscribe((changes) => {
     let dirty = false;
     if ('credits' in changes) {
       snapshot.credits = changes.credits ?? null;
@@ -84,6 +86,10 @@ export function wireBadge(paint: BadgePainter): () => void {
     if ('settings' in changes) dirty = true;
     if (dirty) repaint();
   });
+  // Re-sync once after subscribing: a write landing between the first read
+  // and listener registration would otherwise be silently lost.
+  void sync();
+  return unsubscribe;
 }
 
 /** Test hook: reset module state between specs. */

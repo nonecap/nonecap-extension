@@ -18,13 +18,11 @@ import {
   recognize as apiRecognize,
   register as apiRegister,
   stats as apiStats,
-  type RecognizePayload,
-  type RecognizeData,
-  type ApiResult,
 } from '../shared/api';
 import { get, getAll, set, updateSettings } from '../shared/storage';
 import { cropDataUrl } from '../shared/crop';
 import { createSolveLoop, type LoopDeps } from './solve-loop';
+import { createRecognizeBookkeeper, evaluateGate } from './gate';
 import { setBadgeFlags, wireBadge } from './badge';
 
 // ---------------------------------------------------------------------------
@@ -59,7 +57,7 @@ async function ensureRegistered(): Promise<void> {
   }
   const step = Math.min(registerRetryStep, REGISTER_RETRY_MINUTES.length - 1);
   registerRetryStep += 1;
-  chrome.alarms.create(REGISTER_RETRY_ALARM, {
+  void chrome.alarms.create(REGISTER_RETRY_ALARM, {
     delayInMinutes: REGISTER_RETRY_MINUTES[step] ?? 30,
   });
 }
@@ -109,33 +107,11 @@ async function refreshPausedFlag(): Promise<void> {
 // ---------------------------------------------------------------------------
 // Solve-loop wiring.
 
-/**
- * recognize with side effects: persist returned credits, re-register when the
- * key situation is broken. The loop itself stays pure.
- */
-async function recognizeWithBookkeeping(p: RecognizePayload): Promise<ApiResult<RecognizeData>> {
-  const res = await apiRecognize(p);
-  if (res.ok) {
-    if (res.data.credits !== undefined) {
-      await set({
-        credits: { remaining: res.data.credits.remaining, resetsAt: res.data.credits.resets_at },
-      });
-    }
-    return res;
-  }
-  if (res.kind === 'no_key') {
-    void ensureRegistered();
-  } else if (res.kind === 'bad_key') {
-    // The api client already fell back userKey→extKey, so bad_key here means
-    // the extKey itself is dead (or absent): mint a fresh one.
-    const userKey = await get('userKey');
-    if (userKey === null) {
-      await set({ extKey: null });
-      void ensureRegistered();
-    }
-  }
-  return res;
-}
+/** recognize + storage side effects (see gate.ts). The loop itself stays pure. */
+const recognizeWithBookkeeping = createRecognizeBookkeeper({
+  recognize: apiRecognize,
+  reRegister: () => void ensureRegistered(),
+});
 
 const loopDeps: LoopDeps = {
   async getRect(tabId) {
@@ -149,8 +125,12 @@ const loopDeps: LoopDeps = {
       return null;
     }
   },
-  capture(_tabId, windowId) {
-    return chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+  async capture(_tabId, windowId) {
+    const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+    // Chrome occasionally resolves with undefined/'' (occluded window, quota
+    // edge) instead of rejecting — surface that as a retryable failure.
+    if (!dataUrl) throw new Error('captureVisibleTab returned no data');
+    return dataUrl;
   },
   crop(dataUrl, rect, dpr) {
     return cropDataUrl(dataUrl, rect, dpr);
@@ -173,25 +153,6 @@ const loopDeps: LoopDeps = {
 };
 
 const loop = createSolveLoop(loopDeps);
-
-// ---------------------------------------------------------------------------
-// Gate: may we touch captchas on this host right now?
-
-type Gate = { proceed: boolean; reason: 'ok' | 'off' | 'no-solves' };
-
-async function evaluateGate(host: string, task?: 'grid' | 'single'): Promise<Gate> {
-  const all = await getAll();
-  const s = all.settings;
-  if (!s.autoSolve || s.pausedHosts.includes(host) || s.blocklist.includes(host)) {
-    return { proceed: false, reason: 'off' };
-  }
-  if (task !== undefined && !(task === 'grid' ? s.grid : s.drag)) {
-    return { proceed: false, reason: 'off' };
-  }
-  const haveSolves = all.userKey !== null || (all.credits?.remaining ?? 1) > 0;
-  if (!haveSolves) return { proceed: false, reason: 'no-solves' };
-  return { proceed: true, reason: 'ok' };
-}
 
 // ---------------------------------------------------------------------------
 // Message handlers.
@@ -278,13 +239,25 @@ async function handleConnectKey(key: string): Promise<{ ok: boolean }> {
   return { ok: true };
 }
 
+/** Fallback GET_STATE reply if assembly rejects — never leave the popup hanging. */
+const IDLE_POPUP_STATE: PopupState = {
+  phase: 'idle',
+  credits: null,
+  userKey: null,
+  host: null,
+  paused: false,
+  lastSolve: null,
+  stats: null,
+};
+
 chrome.runtime.onMessage.addListener(
   (raw: unknown, sender, sendResponse): boolean | undefined => {
     const msg = raw as Msg;
     switch (msg.t) {
       case 'CHECKBOX_SEEN':
-        // The anchor frame gates its checkbox click on this reply.
-        void handleCheckboxSeen(sender).then(sendResponse);
+        // The anchor frame gates its checkbox click on this reply; a rejection
+        // must still respond or the sender's channel hangs open.
+        void handleCheckboxSeen(sender).then(sendResponse, () => sendResponse({ proceed: false }));
         return true;
       case 'CHALLENGE_READY':
         void handleChallengeReady(msg, sender);
@@ -299,13 +272,16 @@ chrome.runtime.onMessage.addListener(
         }
         return undefined;
       case 'GET_STATE':
-        void assemblePopupState().then(sendResponse);
+        void assemblePopupState().then(sendResponse, () => sendResponse(IDLE_POPUP_STATE));
         return true;
       case 'SET_PAUSE':
-        void handleSetPause(msg).then(() => sendResponse({ ok: true }));
+        void handleSetPause(msg).then(
+          () => sendResponse({ ok: true }),
+          () => sendResponse({ ok: false }),
+        );
         return true;
       case 'CONNECT_KEY':
-        void handleConnectKey(msg.key).then(sendResponse);
+        void handleConnectKey(msg.key).then(sendResponse, () => sendResponse({ ok: false }));
         return true;
       case 'DISCONNECT_KEY':
         void set({ userKey: null });
@@ -332,6 +308,12 @@ wireBadge((spec) => {
 
 chrome.tabs.onActivated.addListener(() => {
   void refreshPausedFlag();
+});
+
+// A closed tab can't send CHALLENGE_GONE — reap its attempt/phase state here
+// (reports 'failed' if a solve had started, and prunes the loop's tab maps).
+chrome.tabs.onRemoved.addListener((tabId) => {
+  loop.onChallengeGone(tabId);
 });
 
 void refreshPausedFlag();

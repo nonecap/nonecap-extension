@@ -99,6 +99,8 @@ function makeHarness() {
     delayCalls,
     captureStarts,
     runAll,
+    /** Flush microtasks only — pending fake delays stay pending. */
+    flush,
     queue: (...results: RecognizeResult[]) => recognizeQueue.push(...results),
     phaseNames: () => phases.map((p) => p.phase),
     maxInFlight: () => maxInFlight,
@@ -278,6 +280,26 @@ describe('createSolveLoop', () => {
     expect(h.deps.exec).toHaveBeenCalledTimes(2);
     expect(loop.getPhase(1)).toBe('verifying');
     expect(loop.getPhase(2)).toBe('verifying');
+  });
+
+  it('a round cancelled while queued for capture never burns a capture', async () => {
+    const h = makeHarness();
+    h.queue(ok('a'));
+    const loop = createSolveLoop(h.deps);
+
+    loop.onChallengeReady(1, 10, 5, 'grid', 'one.test');
+    loop.onChallengeReady(2, 11, 6, 'grid', 'two.test');
+    await h.flush(); // tab 1's capture is in flight; tab 2 is queued behind it
+
+    loop.onPaused(2);
+    await h.runAll();
+
+    // Only tab 1 ever captured; tab 2 bailed at the head of the queue.
+    expect(h.deps.capture).toHaveBeenCalledTimes(1);
+    expect(h.captureStarts).toHaveLength(1);
+    expect(h.deps.recognize).toHaveBeenCalledTimes(1);
+    expect(loop.getPhase(1)).toBe('verifying');
+    expect(loop.getPhase(2)).toBe('idle');
   });
 
   it('CHALLENGE_GONE after a started attempt reports failed once', async () => {

@@ -37,8 +37,23 @@ export type LoopDeps = {
   onUserKeyDead?(): void;
 };
 
+/**
+ * Hard cap on rounds per challenge. hCaptcha passes after 1-2 correct rounds;
+ * if it is still re-challenging after 6, we're almost certainly
+ * mis-recognizing and would just burn credits — report failed and stand down.
+ */
 export const MAX_ROUNDS = 6;
+/**
+ * Quick in-round retries for a failed capture. captureVisibleTab fails
+ * transiently (window occluded/minimized, focus churn, quota window) and
+ * usually recovers within a beat — more retries would only delay the abort.
+ */
 export const CAPTURE_RETRIES = 2;
+/**
+ * Minimum gap between captures, enforced globally: Chrome caps
+ * captureVisibleTab at MAX_CAPTURE_VISIBLE_TAB_CALLS_PER_SECOND = 2, so
+ * 600ms keeps us safely under the quota even with several tabs solving.
+ */
 export const CAPTURE_SPACING_MS = 600;
 /** Wait before the single retry on a transient (network/server/429) recognize failure. */
 export const TRANSIENT_RETRY_MS = 1500;
@@ -84,7 +99,10 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
   let lastCaptureAt: number | null = null;
 
   function setPhase(tabId: number, phase: Phase, detail?: { secs?: string; credits?: number }): void {
-    phases.set(tabId, phase);
+    // 'idle' is the getPhase default, so store it as absence: every terminal
+    // path prunes its map entry instead of the map growing per tab forever.
+    if (phase === 'idle') phases.delete(tabId);
+    else phases.set(tabId, phase);
     deps.phase(tabId, phase, detail);
   }
 
@@ -140,8 +158,11 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
     setPhase(tabId, 'blocked');
   }
 
-  function captureSerialized(tabId: number, windowId: number): Promise<string> {
+  function captureSerialized(tabId: number, windowId: number, token: Token): Promise<string> {
     const run = captureChain.then(async () => {
+      // The round may have been cancelled while queued behind other tabs'
+      // captures — bail before burning quota for a dead attempt.
+      if (token.cancelled) throw new Error('attempt cancelled while queued');
       if (lastCaptureAt !== null) {
         const wait = lastCaptureAt + CAPTURE_SPACING_MS - deps.now();
         if (wait > 0) await deps.delay(wait);
@@ -179,7 +200,7 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
     let dataUrl: string | null = null;
     for (let i = 0; i <= CAPTURE_RETRIES; i++) {
       try {
-        dataUrl = await captureSerialized(tabId, attempt.windowId);
+        dataUrl = await captureSerialized(tabId, attempt.windowId, token);
       } catch {
         dataUrl = null;
       }
@@ -315,7 +336,11 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
 
   function onChallengeGone(tabId: number): void {
     const attempt = attempts.get(tabId);
-    if (attempt === undefined) return; // already solved/cleared — keep linger alive
+    // No attempt: either already terminal (CHALLENGE_GONE fires right after
+    // SOLVED and after 'blocked' — keep that linger/phase alive) or the tab
+    // was never ours. Nothing to clean up. index.ts also routes
+    // tabs.onRemoved here so closed tabs reap their attempt + phase entry.
+    if (attempt === undefined) return;
     attempt.token.cancelled = true;
     reportFailedIfStarted(attempt);
     clearAttempt(tabId, attempt);
@@ -329,7 +354,7 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
     attempt.token.cancelled = true;
     clearAttempt(tabId, attempt);
     // Silent: no phase emission after a user-initiated cancel.
-    phases.set(tabId, 'idle');
+    phases.delete(tabId);
   }
 
   function getPhase(tabId: number): Phase {
