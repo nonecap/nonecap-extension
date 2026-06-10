@@ -35,6 +35,11 @@ describe('maskKey', () => {
   it('keeps the prefix and last four', () => {
     expect(maskKey('nc_live_a1b2c3d4f00d')).toBe('nc_live_••••f00d');
   });
+
+  it('fully masks keys too short for non-overlapping slices', () => {
+    expect(maskKey('nc_live_ab')).toBe('nc_••••');
+    expect(maskKey('')).toBe('nc_••••');
+  });
 });
 
 describe('formatResetsIn', () => {
@@ -102,9 +107,12 @@ describe('phase helpers', () => {
 });
 
 describe('keyHint', () => {
-  it('covers all three variants', () => {
+  it('covers all four variants', () => {
     expect(keyHint(null)).toBe('Find your key in the NoneCap dashboard.');
     expect(keyHint('format')).toBe('That doesn’t look like a NoneCap key (nc_live_…)');
     expect(keyHint('rejected')).toBe('Key was rejected by the API');
+    expect(keyHint('unreachable')).toBe(
+      'Could not reach the extension background. Try reloading the extension.',
+    );
   });
 });

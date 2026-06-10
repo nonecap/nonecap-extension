@@ -14,17 +14,27 @@ export const KEY_RE = /^nc_(live|test)_[A-Za-z0-9]{8,}$/;
 export const HINT_DEFAULT = 'Find your key in the NoneCap dashboard.';
 export const HINT_FORMAT = 'That doesn’t look like a NoneCap key (nc_live_…)';
 export const HINT_REJECTED = 'Key was rejected by the API';
+export const HINT_UNREACHABLE =
+  'Could not reach the extension background. Try reloading the extension.';
 
-export type KeyError = 'format' | 'rejected' | null;
+export type KeyError = 'format' | 'rejected' | 'unreachable' | null;
 
 export function keyHint(err: KeyError): string {
   if (err === 'format') return HINT_FORMAT;
   if (err === 'rejected') return HINT_REJECTED;
+  if (err === 'unreachable') return HINT_UNREACHABLE;
   return HINT_DEFAULT;
 }
 
-/** `nc_live_a1b2c3d4e5f6` → `nc_live_••••e5f6`. */
+/**
+ * `nc_live_a1b2c3d4e5f6` → `nc_live_••••e5f6`.
+ *
+ * Precondition: real keys always match KEY_RE (≥ 16 chars), so the prefix and
+ * suffix slices never overlap. Anything shorter (corrupt storage, tests) falls
+ * back to a fully masked stub instead of leaking overlapping slices.
+ */
 export function maskKey(key: string): string {
+  if (key.length < 12) return 'nc_••••';
   return `${key.slice(0, 8)}••••${key.slice(-4)}`;
 }
 

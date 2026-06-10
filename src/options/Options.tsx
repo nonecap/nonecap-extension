@@ -11,7 +11,7 @@ import type { ConnectKeyReply, Msg } from '../shared/messages';
 import type { Settings, SolveStyle } from '../shared/settings';
 import { getAll, subscribe, updateSettings } from '../shared/storage';
 import { EXTENSION_VERSION } from '../shared/version';
-import { KEY_RE, maskKey, type KeyError } from '../popup/format';
+import { KEY_RE, keyHint, maskKey, type KeyError } from '../popup/format';
 
 const PRIVACY_URL = 'https://nonecap.com/extension/privacy';
 const DOCS_URL = 'https://nonecap.com/api-reference';
@@ -36,6 +36,7 @@ function Toggle({
       className={'pp-toggle' + (on ? ' on' : '')}
       onClick={onClick}
       disabled={disabled}
+      aria-pressed={on}
       aria-label={label ?? 'Toggle'}
     ></button>
   );
@@ -88,7 +89,12 @@ export function Options() {
   };
 
   const togglePausedHost = async (host: string, paused: boolean): Promise<void> => {
-    await send({ t: 'SET_PAUSE', host, paused: !paused });
+    try {
+      await send({ t: 'SET_PAUSE', host, paused: !paused });
+    } catch {
+      // Background unreachable — the storage subscription will resync when it
+      // comes back; nothing to roll back here (row state follows settings).
+    }
   };
 
   const tryConnect = async (): Promise<void> => {
@@ -97,7 +103,13 @@ export function Options() {
       setKeyErr('format');
       return;
     }
-    const reply = await send<ConnectKeyReply>({ t: 'CONNECT_KEY', key: k });
+    let reply: ConnectKeyReply | undefined;
+    try {
+      reply = await send<ConnectKeyReply>({ t: 'CONNECT_KEY', key: k });
+    } catch {
+      setKeyErr('unreachable');
+      return;
+    }
     if (reply?.ok) {
       setKeyErr(null);
       setKeyDraft('');
@@ -108,17 +120,20 @@ export function Options() {
   };
 
   const disconnect = async (): Promise<void> => {
-    await send({ t: 'DISCONNECT_KEY' });
+    try {
+      await send({ t: 'DISCONNECT_KEY' });
+    } catch {
+      // Background unreachable — keep the key connected rather than lying.
+      return;
+    }
     setUserKey(null);
   };
 
   if (settings === null) return <div className="opts"></div>;
 
   const accountSub =
-    keyErr === 'format' ? (
-      <span className="err">That doesn’t look like a NoneCap key (nc_live_…)</span>
-    ) : keyErr === 'rejected' ? (
-      <span className="err">Key was rejected by the API</span>
+    keyErr !== null ? (
+      <span className="err">{keyHint(keyErr)}</span>
     ) : (
       'On the free plan: 100 credits per day'
     );
@@ -154,6 +169,7 @@ export function Options() {
               </div>
               <select
                 value={settings.style}
+                aria-label="Solving style"
                 onInput={(e) => {
                   const style = (e.currentTarget as HTMLSelectElement).value as SolveStyle;
                   void patch((s) => ({ ...s, style }));
@@ -236,6 +252,7 @@ export function Options() {
                 <div className="pp-keyform" style={{ width: 280 }}>
                   <input
                     placeholder="nc_live_…"
+                    aria-label="NoneCap API key"
                     value={keyDraft}
                     spellcheck={false}
                     className={keyErr !== null ? 'bad' : ''}
@@ -262,7 +279,12 @@ export function Options() {
             {settings.blocklist.map((s) => (
               <div className="opts-row site-item" key={s}>
                 <span className="mono">{s}</span>
-                <button className="rm" title="Remove" onClick={() => void removeSite(s)}>
+                <button
+                  className="rm"
+                  title="Remove"
+                  aria-label={'Remove ' + s}
+                  onClick={() => void removeSite(s)}
+                >
                   ×
                 </button>
               </div>
@@ -277,7 +299,8 @@ export function Options() {
                   </span>
                   <button
                     className="rm"
-                    title="Toggle"
+                    title={paused ? 'Resume' : 'Pause'}
+                    aria-label={(paused ? 'Resume solving on ' : 'Pause solving on ') + host}
                     onClick={() => void togglePausedHost(host, paused)}
                   >
                     {paused ? '▸' : '⏸'}
@@ -288,6 +311,7 @@ export function Options() {
             <div className="opts-addsite">
               <input
                 placeholder="domain.com"
+                aria-label="Add a site to never solve on"
                 value={draft}
                 onInput={(e) => setDraft((e.currentTarget as HTMLInputElement).value)}
                 onKeyDown={(e) => {

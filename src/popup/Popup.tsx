@@ -101,7 +101,13 @@ export function Popup() {
       setKeyErr('format');
       return;
     }
-    const reply = await send<ConnectKeyReply>({ t: 'CONNECT_KEY', key: k });
+    let reply: ConnectKeyReply | undefined;
+    try {
+      reply = await send<ConnectKeyReply>({ t: 'CONNECT_KEY', key: k });
+    } catch {
+      setKeyErr('unreachable');
+      return;
+    }
     if (reply?.ok) {
       setKeyErr(null);
       setKeyOpen(false);
@@ -113,15 +119,23 @@ export function Popup() {
   };
 
   const disconnect = async (): Promise<void> => {
-    await send({ t: 'DISCONNECT_KEY' });
+    try {
+      await send({ t: 'DISCONNECT_KEY' });
+    } catch {
+      // Background unreachable — refresh below keeps the last known state.
+    }
     await refresh();
   };
 
   const togglePause = async (): Promise<void> => {
     if (!state || state.host === null) return;
-    const paused = !state.paused;
-    setState({ ...state, paused }); // optimistic; refresh confirms
-    await send({ t: 'SET_PAUSE', host: state.host, paused });
+    const { host, paused } = state;
+    setState((prev) => (prev ? { ...prev, paused: !prev.paused } : prev)); // optimistic; refresh confirms
+    try {
+      await send({ t: 'SET_PAUSE', host, paused: !paused });
+    } catch {
+      // Background unreachable — refresh below reverts the optimistic flip.
+    }
     await refresh();
   };
 
@@ -160,6 +174,7 @@ export function Popup() {
         <input
           autoFocus
           placeholder="nc_live_…"
+          aria-label="NoneCap API key"
           value={keyDraft}
           spellcheck={false}
           className={keyErr !== null ? 'bad' : ''}
@@ -290,6 +305,7 @@ export function Popup() {
             className={'pp-toggle' + (paused ? '' : ' on')}
             onClick={() => void togglePause()}
             disabled={host === null}
+            aria-pressed={!paused}
             aria-label="Toggle auto-solve on this site"
           ></button>
         </div>
@@ -319,15 +335,9 @@ export function Popup() {
         <a href={DOCS_URL} target="_blank" rel="noreferrer">
           Docs ↗
         </a>
-        <a
-          href="#"
-          onClick={(e) => {
-            e.preventDefault();
-            openOptions();
-          }}
-        >
+        <button className="pp-footbtn" onClick={openOptions}>
           Settings
-        </a>
+        </button>
       </div>
     </div>
   );

@@ -227,6 +227,28 @@ describe('Popup — key form', () => {
     );
   });
 
+  it('shows the unreachable hint when the background send rejects', async () => {
+    await mount();
+    const rejections: unknown[] = [];
+    const onUnhandled = (e: PromiseRejectionEvent): void => {
+      rejections.push(e.reason);
+    };
+    window.addEventListener('unhandledrejection', onUnhandled);
+    sendMessage.mockImplementation(async (msg: Msg) => {
+      if (msg.t === 'GET_STATE') return state;
+      throw new Error('Could not establish connection. Receiving end does not exist.');
+    });
+    const input = await openForm();
+    await type(input, 'nc_live_a1b2c3d4');
+    click(container.querySelector('.pp-keyform .pp-btn')!);
+    await flush();
+    expect(container.querySelector('.pp-key-hint.err')!.textContent).toBe(
+      'Could not reach the extension background. Try reloading the extension.',
+    );
+    window.removeEventListener('unhandledrejection', onUnhandled);
+    expect(rejections).toEqual([]);
+  });
+
   it('refreshes state after a successful connect', async () => {
     await mount();
     sendMessage.mockImplementation(async (msg: Msg) => {
