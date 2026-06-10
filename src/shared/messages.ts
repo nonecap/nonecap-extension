@@ -29,12 +29,43 @@ export type Phase =
 
 export type RectLike = { x: number; y: number; width: number; height: number };
 
+/**
+ * Challenge-frame geometry, the reply to GET_GEOMETRY. Every Pt is in
+ * IFRAME-LOCAL CSS viewport coordinates (the background adds the challenge
+ * iframe's top-frame rect origin before dispatching trusted input).
+ */
+export type Geometry = {
+  /** Tile centres in 1-based reading order: array index 0 = tile 1. */
+  tiles: Pt[];
+  /**
+   * The `.button-submit` centre and whether it currently reads "Skip"
+   * (hCaptcha reuses the element for Verify/Next AND Skip — clicking it
+   * while it reads Skip throws the challenge away, so the background
+   * refuses while isSkip is true).
+   */
+  verify: { center: Pt; isSkip: boolean } | null;
+  /** The refresh button centre, if present. */
+  refresh: Pt | null;
+};
+
+/** Cosmetic-cursor operations the background sequences in the challenge frame. */
+export type CursorOp = 'move' | 'press' | 'release' | 'click';
+
 export type Msg =
   | { t: 'CHECKBOX_SEEN' } // anchor frame → bg
   | { t: 'CHALLENGE_READY'; task: 'grid' | 'single' } // challenge frame → bg
   | { t: 'CHALLENGE_GONE' } // challenge frame → bg
   | { t: 'GET_CHALLENGE_RECT' } // bg → top frame; reply: { rect: RectLike; dpr: number } | null
-  | { t: 'EXEC'; action: ExtAction } // bg → challenge frame; reply: { done: boolean }
+  | { t: 'GET_GEOMETRY' } // bg → challenge frame; reply: Geometry | null
+  // bg → challenge frame; fire-and-forget (no reply). x/y are iframe-local CSS
+  // viewport coords; the frame only animates the cosmetic cursor — the
+  // background owns sequencing and dispatches the real (trusted CDP) input.
+  | { t: 'CURSOR'; op: CursorOp; x?: number; y?: number }
+  // DEPRECATED (kept one phase for the challenge frame's handler): the
+  // background no longer sends EXEC — real input is dispatched as trusted CDP
+  // events from the background. Phase 2 removes the frame handler, then this
+  // variant and ExecReply are deleted.
+  | { t: 'EXEC'; action: ExtAction } // @deprecated bg → challenge frame; reply: { done: boolean }
   | { t: 'PHASE'; phase: Phase; detail?: { secs?: string; credits?: number } } // bg → top frame + popup
   | { t: 'SOLVED'; secs: number } // top frame → bg
   | { t: 'OPEN_OPTIONS' } // top frame → bg; no reply (content scripts cannot open extension pages)
@@ -46,7 +77,10 @@ export type Msg =
 /** Reply to GET_CHALLENGE_RECT. */
 export type ChallengeRectReply = { rect: RectLike; dpr: number } | null;
 
-/** Reply to EXEC. */
+/** Reply to GET_GEOMETRY. */
+export type GeometryReply = Geometry | null;
+
+/** @deprecated Reply to the deprecated EXEC message — deleted with it in Phase 2. */
 export type ExecReply = { done: boolean };
 
 /** Reply to CONNECT_KEY. */

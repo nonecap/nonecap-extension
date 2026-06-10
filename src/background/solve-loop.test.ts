@@ -98,7 +98,7 @@ function makeHarness() {
       if (!next) throw new Error('recognize called more times than the test scripted');
       return next;
     }),
-    exec: vi.fn(async () => true),
+    performAction: vi.fn(async () => true),
     outcome: vi.fn(async (p: OutcomeCall) => {
       outcomes.push(p);
       return { ok: true };
@@ -142,10 +142,13 @@ describe('createSolveLoop', () => {
     expect(h.deps.recognize).toHaveBeenCalledWith(
       expect.objectContaining({ task: 'grid', host: 'example.com', session: null }),
     );
-    expect(h.deps.exec).toHaveBeenCalledWith(
+    // performAction receives the action AND the round's already-fetched rect
+    // (the loop must not fetch it twice).
+    expect(h.deps.performAction).toHaveBeenCalledWith(
       1,
       7,
       expect.objectContaining({ action: 'click_tiles', tiles: [1, 3] }),
+      { x: 10, y: 10, width: 400, height: 500 },
     );
     expect(h.phaseNames()).toEqual(['solving', 'verifying']);
 
@@ -183,7 +186,7 @@ describe('createSolveLoop', () => {
       loop.onChallengeReady(1, 10, 7, 'grid', 'example.com');
       await h.runAll();
     }
-    expect(h.deps.exec).toHaveBeenCalledTimes(MAX_ROUNDS);
+    expect(h.deps.performAction).toHaveBeenCalledTimes(MAX_ROUNDS);
     expect(h.outcomes).toEqual([]);
 
     loop.onChallengeReady(1, 10, 7, 'grid', 'example.com'); // round 7 → cap
@@ -245,7 +248,7 @@ describe('createSolveLoop', () => {
 
     expect(h.deps.crop).not.toHaveBeenCalled();
     expect(h.deps.recognize).not.toHaveBeenCalled();
-    expect(h.deps.exec).not.toHaveBeenCalled();
+    expect(h.deps.performAction).not.toHaveBeenCalled();
     expect(h.outcomes).toEqual([]);
     expect(h.phaseNames()).toEqual(['solving']); // no phase emissions after the cancel
     expect(loop.getPhase(1)).toBe('idle');
@@ -281,7 +284,7 @@ describe('createSolveLoop', () => {
 
     expect(h.deps.recognize).toHaveBeenCalledTimes(2);
     expect(h.delayCalls).toContain(TRANSIENT_RETRY_MS);
-    expect(h.deps.exec).not.toHaveBeenCalled();
+    expect(h.deps.performAction).not.toHaveBeenCalled();
     expect(h.phaseNames()).toEqual(['solving', 'error', 'idle']);
     expect(h.outcomes).toEqual([]); // no session ever started
     expect(loop.getPhase(1)).toBe('idle');
@@ -300,7 +303,7 @@ describe('createSolveLoop', () => {
     expect(h.maxInFlight()).toBe(1);
     const [first, second] = h.captureStarts;
     expect(second! - first!).toBeGreaterThanOrEqual(CAPTURE_SPACING_MS);
-    expect(h.deps.exec).toHaveBeenCalledTimes(2);
+    expect(h.deps.performAction).toHaveBeenCalledTimes(2);
     expect(loop.getPhase(1)).toBe('verifying');
     expect(loop.getPhase(2)).toBe('verifying');
   });

@@ -13,7 +13,12 @@ export default defineManifest({
     48: 'icons/icon48.png',
     128: 'icons/icon128.png',
   },
-  permissions: ['storage', 'tabs', 'alarms'],
+  // storage: settings/keys/credits; tabs: captureVisibleTab + frame messaging;
+  // alarms: registration retries; debugger: trusted (isTrusted:true) mouse
+  // input via CDP — the only way to solve hCaptcha drag/point-on-canvas
+  // puzzles, which ignore synthetic content-script events
+  // (docs/SOLVING-ARCHITECTURE.md). Attached only during an active solve.
+  permissions: ['storage', 'tabs', 'alarms', 'debugger'],
   host_permissions: ['<all_urls>'],
   action: {
     default_popup: 'src/popup/index.html',

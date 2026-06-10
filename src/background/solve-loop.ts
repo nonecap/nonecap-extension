@@ -25,8 +25,16 @@ export type LoopDeps = {
     host: string;
     session?: string | null;
   }): Promise<RecognizeResult>;
-  /** Send EXEC to the challenge frame; resolves to ExecReply.done. */
-  exec(tabId: number, frameId: number, action: ExtAction): Promise<boolean>;
+  /**
+   * Perform the recognized action with trusted (CDP) input, animating the
+   * challenge frame's cosmetic cursor in sync. `rect` is the challenge
+   * iframe's top-frame viewport rect already fetched for this round's
+   * capture — the performer converts coordinates against it instead of
+   * fetching again. Injected from index.ts (the loop stays chrome-free);
+   * resolves false when the action could not be performed (e.g. debugger
+   * attach failed or the frame's geometry was unavailable).
+   */
+  performAction(tabId: number, frameId: number, action: ExtAction, rect: RectLike): Promise<boolean>;
   /** Report a finished session to the API (fire-and-forget semantics). */
   outcome(p: { session: string; result: 'solved' | 'failed'; rounds?: number }): Promise<unknown>;
   /** Push a phase to the top frame overlay + badge hook. */
@@ -60,7 +68,7 @@ export const TRANSIENT_RETRY_MS = 1500;
 /** How long the 'solved' / 'error' phases stay up before falling back to 'idle'. */
 export const PHASE_LINGER_MS = 4000;
 /**
- * Watchdog for a concluded round: armed when EXEC finishes (phase
+ * Watchdog for a concluded round: armed when the action finishes (phase
  * 'verifying'). 20s comfortably covers hCaptcha's verify animation plus the
  * next round's render; if no CHALLENGE_READY / SOLVED / CHALLENGE_GONE has
  * arrived by then the challenge frame is dead and the attempt would
@@ -147,7 +155,7 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
   }
 
   /**
-   * Arm the post-exec stall watchdog. Disarmed by the next CHALLENGE_READY /
+   * Arm the post-action stall watchdog. Disarmed by the next CHALLENGE_READY /
    * SOLVED / CHALLENGE_GONE / onPaused (all of which either re-arm here or
    * pass through clearAttempt). On fire — token-guarded and re-checked
    * against the live attempt, like every other resumption point — the
@@ -314,7 +322,7 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
 
     let done = false;
     try {
-      done = await deps.exec(tabId, attempt.frameId, res.data);
+      done = await deps.performAction(tabId, attempt.frameId, res.data, rectInfo.rect);
     } catch {
       done = false;
     }
@@ -336,7 +344,7 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
     host: string,
   ): void {
     cancelLinger(tabId);
-    cancelWatchdog(tabId); // the next round arrived in time — re-armed post-exec
+    cancelWatchdog(tabId); // the next round arrived in time — re-armed post-action
 
     const existing = attempts.get(tabId);
     if (existing !== undefined) {

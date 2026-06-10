@@ -8,10 +8,14 @@
 import {
   assertNever,
   type ChallengeRectReply,
-  type ExecReply,
+  type CursorOp,
+  type ExtAction,
+  type GeometryReply,
   type Msg,
   type Phase,
   type PopupState,
+  type Pt,
+  type RectLike,
 } from '../shared/messages';
 import {
   outcome as apiOutcome,
@@ -24,6 +28,7 @@ import { cropDataUrl } from '../shared/crop';
 import { createSolveLoop, type LoopDeps } from './solve-loop';
 import { createRecognizeBookkeeper, evaluateGate, refreshStatsIfStale } from './gate';
 import { setBadgeFlags, wireBadge } from './badge';
+import { chromeDebuggerTransport, createInputDriver, localToTop, normalizedToTop } from './input';
 
 // ---------------------------------------------------------------------------
 // Registration (anonymous free-tier key) with alarm-backed retries.
@@ -105,6 +110,148 @@ async function refreshPausedFlag(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
+// Trusted input (chrome.debugger / CDP).
+//
+// Real mouse input is dispatched from here as trusted CDP events in top-frame
+// viewport CSS coords (docs/SOLVING-ARCHITECTURE.md). The challenge frame
+// only supplies geometry (GET_GEOMETRY) and renders the cosmetic cursor
+// (CURSOR) — it never dispatches real pointer events anymore.
+
+const input = createInputDriver(chromeDebuggerTransport, {
+  now: () => Date.now(),
+  delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+});
+
+// The user can dismiss Chrome's debugger infobar (or the target can go away);
+// either way our session is gone — reset the driver so the next attempt
+// re-attaches instead of dispatching into the void.
+chrome.debugger.onDetach.addListener((source) => {
+  if (source.tabId !== undefined) input.markDetached(source.tabId);
+});
+
+/** Ask the challenge frame for tile/verify/refresh centres (iframe-local). */
+async function getGeometry(tabId: number, frameId: number): Promise<GeometryReply> {
+  try {
+    const msg: Msg = { t: 'GET_GEOMETRY' };
+    const reply = (await chrome.tabs.sendMessage(tabId, msg, { frameId })) as
+      | GeometryReply
+      | undefined;
+    return reply ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Fire-and-forget cosmetic-cursor op to the challenge frame. */
+function sendCursor(tabId: number, frameId: number, op: CursorOp, p?: Pt): void {
+  const msg: Msg = { t: 'CURSOR', op, ...(p !== undefined ? { x: p.x, y: p.y } : {}) };
+  void chrome.tabs.sendMessage(tabId, msg, { frameId }).catch(() => {
+    // The cursor is cosmetic — a missing frame must never fail the action.
+  });
+}
+
+/** Small human-ish pause between consecutive clicks (not the press dwell). */
+function actionPause(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 60 + Math.random() * 80));
+}
+
+/**
+ * Perform a recognized action with trusted input, mirroring the old in-frame
+ * executor's sequencing: act → re-read geometry → click Verify/Next unless
+ * it still reads "Skip" (an unregistered answer; clicking would throw the
+ * challenge away — leave it and let the round re-arm / the watchdog end it).
+ * Coordinates: vision points are normalized 0-1000 over `rect`; tile /
+ * verify / refresh centres come from GET_GEOMETRY in iframe-local coords and
+ * are offset by `rect`'s origin. Resolves false when nothing could be done
+ * (attach failed, geometry unavailable) so the loop aborts the round.
+ */
+async function performAction(
+  tabId: number,
+  frameId: number,
+  action: ExtAction,
+  rect: RectLike,
+): Promise<boolean> {
+  try {
+    await input.attach(tabId);
+  } catch (err) {
+    // One CDP client per tab: DevTools (or another extension) already holds
+    // it. Not retryable from here — fail the action; the loop stands down.
+    console.warn('[nonecap] debugger attach failed (is DevTools open on this tab?)', err);
+    return false;
+  }
+
+  /** Trusted click at an iframe-local point, cursor animated in sync. */
+  const clickLocal = async (local: Pt): Promise<void> => {
+    sendCursor(tabId, frameId, 'move', local);
+    const top = localToTop(local, rect);
+    await input.click(tabId, top.x, top.y);
+    sendCursor(tabId, frameId, 'click', local);
+  };
+
+  /** Re-read geometry and click Verify/Next — never Skip. */
+  const clickVerifyUnlessSkip = async (): Promise<void> => {
+    const geo = await getGeometry(tabId, frameId);
+    if (!geo?.verify || geo.verify.isSkip) return;
+    await actionPause();
+    await clickLocal(geo.verify.center);
+  };
+
+  switch (action.action) {
+    case 'click_tiles': {
+      const geo = await getGeometry(tabId, frameId);
+      if (geo === null) return false;
+      for (const n of action.tiles) {
+        const center = geo.tiles[n - 1]; // 1-based reading order
+        if (!center) continue; // best-effort, like the old executor
+        await clickLocal(center);
+        await actionPause();
+      }
+      await clickVerifyUnlessSkip();
+      return true;
+    }
+    case 'click_points': {
+      for (const p of action.points) {
+        // Normalized → iframe-local (rect-relative without the origin).
+        await clickLocal({ x: (p.x / 1000) * rect.width, y: (p.y / 1000) * rect.height });
+        await actionPause();
+      }
+      await clickVerifyUnlessSkip();
+      return true;
+    }
+    case 'drag': {
+      const moves = action.moves.length > 0 ? action.moves : [{ from: action.from, to: action.to }];
+      for (const move of moves) {
+        const fromLocal = { x: (move.from.x / 1000) * rect.width, y: (move.from.y / 1000) * rect.height };
+        const toLocal = { x: (move.to.x / 1000) * rect.width, y: (move.to.y / 1000) * rect.height };
+        sendCursor(tabId, frameId, 'move', fromLocal);
+        sendCursor(tabId, frameId, 'press');
+        await input.drag(tabId, normalizedToTop(move.from, rect), normalizedToTop(move.to, rect));
+        sendCursor(tabId, frameId, 'move', toLocal);
+        sendCursor(tabId, frameId, 'release');
+        await actionPause();
+      }
+      await clickVerifyUnlessSkip();
+      return true;
+    }
+    case 'refresh': {
+      const geo = await getGeometry(tabId, frameId);
+      if (!geo?.refresh) return false;
+      await clickLocal(geo.refresh);
+      return true;
+    }
+    default:
+      return assertNever(action);
+  }
+}
+
+/** Detach the debugger when an attempt reaches any terminal state. */
+function detachIfTerminal(tabId: number, phase: Phase): void {
+  if (phase === 'idle' || phase === 'solved' || phase === 'error' || phase === 'blocked') {
+    void input.detach(tabId);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Solve-loop wiring.
 
 /** recognize + storage side effects (see gate.ts). The loop itself stays pure. */
@@ -136,13 +283,14 @@ const loopDeps: LoopDeps = {
     return cropDataUrl(dataUrl, rect, dpr);
   },
   recognize: recognizeWithBookkeeping,
-  async exec(tabId, frameId, action) {
-    const msg: Msg = { t: 'EXEC', action };
-    const reply = (await chrome.tabs.sendMessage(tabId, msg, { frameId })) as ExecReply | undefined;
-    return reply?.done === true;
-  },
+  performAction,
   outcome: (p) => apiOutcome(p),
-  phase: sendPhaseToTab,
+  phase(tabId, phase, detail) {
+    sendPhaseToTab(tabId, phase, detail);
+    // Attempt-terminal phases end the trusted-input session: the debugger
+    // (and Chrome's infobar with it) is attached only while actively solving.
+    detachIfTerminal(tabId, phase);
+  },
   now: () => Date.now(),
   delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   onUserKeyDead() {
@@ -218,7 +366,12 @@ async function handleSetPause(msg: Extract<Msg, { t: 'SET_PAUSE' }>): Promise<vo
   if (msg.paused) {
     const tabs = await chrome.tabs.query({});
     for (const tab of tabs) {
-      if (tab.id !== undefined && hostnameOf(tab.url) === msg.host) loop.onPaused(tab.id);
+      if (tab.id !== undefined && hostnameOf(tab.url) === msg.host) {
+        loop.onPaused(tab.id);
+        // onPaused is deliberately silent (no phase emission), so the
+        // terminal-phase detach hook never sees it — detach here.
+        void input.detach(tab.id);
+      }
     }
   }
   await refreshPausedFlag();
@@ -295,8 +448,11 @@ chrome.runtime.onMessage.addListener(
         // pages, so the pill's CTA delegates to the background.
         void chrome.runtime.openOptionsPage();
         return undefined;
-      // bg → frame messages; never handled here.
+      // bg → frame messages; never handled here. (EXEC is deprecated — no
+      // longer sent; the variant lives until Phase 2 drops the frame handler.)
       case 'GET_CHALLENGE_RECT':
+      case 'GET_GEOMETRY':
+      case 'CURSOR':
       case 'EXEC':
       case 'PHASE':
         return undefined;
@@ -323,6 +479,9 @@ chrome.tabs.onActivated.addListener(() => {
 // (reports 'failed' if a solve had started, and prunes the loop's tab maps).
 chrome.tabs.onRemoved.addListener((tabId) => {
   loop.onChallengeGone(tabId);
+  // Chrome detaches the debugger with the tab; this just prunes driver state
+  // (best-effort + idempotent, the transport swallows "not attached").
+  void input.detach(tabId);
 });
 
 void refreshPausedFlag();
