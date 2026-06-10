@@ -61,6 +61,14 @@ jobs:
       - name: Test
         run: bun run test
 
+      - name: Verify tag matches manifest version
+        run: |
+          want="v$(jq -r .version package.json)"
+          if [ "$want" != "$GITHUB_REF_NAME" ]; then
+            echo "::error::tag $GITHUB_REF_NAME does not match package.json version ($want) — refusing to ship a mismatched zip. Bump the version or retag."
+            exit 1
+          fi
+
       - name: Package
         run: bun run package
 

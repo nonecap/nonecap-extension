@@ -19,7 +19,9 @@
 
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 
-const PORT = 8787;
+/** Default port; override with PORT=… (the e2e spec passes its own constant). */
+export const DEFAULT_PORT = 8787;
+const PORT = Number(process.env['PORT']) || DEFAULT_PORT;
 
 type MockRecognizeResponse = {
   action: 'click_tiles' | 'click_points' | 'drag' | 'refresh';
@@ -280,12 +282,21 @@ async function handle(req: IncomingMessage, res: ServerResponse): Promise<void> 
   send(res, 404, { error: { code: 'not_found', message: `no route for ${method} ${path}` } });
 }
 
-createServer((req, res) => {
-  handle(req, res).catch((err: unknown) => {
-    console.error('[mock] handler error:', err);
-    send(res, 500, { error: { code: 'internal', message: 'mock server error' } });
+export function startMockServer(port: number = PORT): ReturnType<typeof createServer> {
+  return createServer((req, res) => {
+    handle(req, res).catch((err: unknown) => {
+      console.error('[mock] handler error:', err);
+      send(res, 500, { error: { code: 'internal', message: 'mock server error' } });
+    });
+  }).listen(port, '127.0.0.1', () => {
+    console.log(`[mock] NoneCap mock API (dev only) listening on http://127.0.0.1:${port}`);
+    console.log(`[mock] point the extension at it: chrome.storage.local.set({ apiBase: 'http://localhost:${port}' })`);
   });
-}).listen(PORT, '127.0.0.1', () => {
-  console.log(`[mock] NoneCap mock API (dev only) listening on http://127.0.0.1:${PORT}`);
-  console.log(`[mock] point the extension at it: chrome.storage.local.set({ apiBase: 'http://localhost:${PORT}' })`);
-});
+}
+
+// Only listen when run directly (`bun scripts/mock-api.ts`). The e2e spec
+// imports DEFAULT_PORT/JournalEntry from this module and must NOT start a
+// second server in the test process — it spawns its own child instead.
+if (import.meta.main) {
+  startMockServer();
+}

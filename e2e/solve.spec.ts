@@ -38,15 +38,17 @@ import { createServer, type Server } from 'node:http';
 import { existsSync, readFileSync } from 'node:fs';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { JournalEntry } from '../scripts/mock-api';
+import { DEFAULT_PORT, type JournalEntry } from '../scripts/mock-api';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const DIST = path.join(ROOT, 'dist');
 
-const MOCK_PORT = 8787;
+// Share the port with mock-api.ts (single source of truth) and pass it back
+// to the spawned server via PORT so the two can never drift.
+const MOCK_PORT = DEFAULT_PORT;
 const MOCK = `http://127.0.0.1:${MOCK_PORT}`;
 const PAGE_PORT = 8788;
-const FIXTURE_URL = `http://localhost:${PAGE_PORT}/demo.html`;
+const FIXTURE_URL = `http://127.0.0.1:${PAGE_PORT}/demo.html`;
 const DEMO_URL = 'https://accounts.hcaptcha.com/demo';
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
@@ -103,13 +105,19 @@ test.beforeAll(async () => {
     mockProc = spawn('bun', [path.join(ROOT, 'scripts', 'mock-api.ts')], {
       cwd: ROOT,
       stdio: ['ignore', 'pipe', 'pipe'],
+      // Keep the child on the same port the spec talks to (single constant).
+      env: { ...process.env, PORT: String(MOCK_PORT) },
     });
     mockProc.stdout?.on('data', (d: Buffer) => process.stdout.write(d.toString()));
     mockProc.stderr?.on('data', (d: Buffer) => process.stderr.write(d.toString()));
+    // A mid-run crash would otherwise surface only as opaque fetch failures.
+    mockProc.on('exit', (code) => {
+      if (code !== null && code !== 0) console.error(`[e2e] mock API exited unexpectedly with code ${code}`);
+    });
     const up = await waitFor(mockUp, 10_000, 200);
     expect(
       up,
-      'mock API never came up on 127.0.0.1:8787 (is the port held by another process?)',
+      `mock API never came up on 127.0.0.1:${MOCK_PORT} (is the port held by another process?)`,
     ).toBe(true);
   }
 
@@ -228,8 +236,11 @@ test('demo page: full solve loop — capture, recognize, execute, outcome', asyn
   let page: Page | null = null;
   let engaged = false;
   for (let attempt = 1; attempt <= 3 && !engaged; attempt++) {
-    await resetJournal();
+    // Close the previous attempt's page FIRST so its still-running solve loop
+    // cannot POST into the journal we are about to reset (which would make the
+    // fresh attempt look engaged before its own page has even loaded).
     if (page) await page.close();
+    await resetJournal();
     page = await ctx.newPage();
     await page.goto(DEMO_URL);
     engaged = await waitFor(async () => (await recognizeEntries()).length > 0, 30_000);

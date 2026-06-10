@@ -22,6 +22,10 @@ const DIST = path.join(ROOT, 'dist');
 
 function run(cmd: string, args: string[], cwd: string): void {
   const res = spawnSync(cmd, args, { cwd, stdio: 'inherit' });
+  if ((res.error as NodeJS.ErrnoException | undefined)?.code === 'ENOENT' && cmd === 'zip') {
+    console.error('[package] zip binary not found — install zip (default on macOS; apt-get install zip on Linux)');
+    process.exit(1);
+  }
   if (res.error || res.status !== 0) {
     console.error(`[package] command failed (${res.status ?? res.error?.message}): ${cmd} ${args.join(' ')}`);
     process.exit(res.status ?? 1);
