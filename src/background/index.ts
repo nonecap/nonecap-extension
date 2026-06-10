@@ -118,16 +118,32 @@ async function refreshPausedFlag(): Promise<void> {
 // (CURSOR) — it never dispatches real pointer events anymore.
 
 const input = createInputDriver(chromeDebuggerTransport, {
-  now: () => Date.now(),
   delay: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 });
 
 // The user can dismiss Chrome's debugger infobar (or the target can go away);
 // either way our session is gone — reset the driver so the next attempt
 // re-attaches instead of dispatching into the void.
-chrome.debugger.onDetach.addListener((source) => {
-  if (source.tabId !== undefined) input.markDetached(source.tabId);
+chrome.debugger.onDetach.addListener((source, reason) => {
+  if (source.tabId === undefined) return;
+  input.markDetached(source.tabId);
+  // Dismissing the infobar is a deliberate user opt-out: stand the attempt
+  // down too, or the next round would just re-attach and re-show the banner.
+  if (reason === 'canceled_by_user') loop.onChallengeGone(source.tabId);
 });
+
+/** Ask the top frame for the challenge popup's viewport rect (+ dpr). */
+async function getChallengeRect(tabId: number): Promise<ChallengeRectReply> {
+  try {
+    const msg: Msg = { t: 'GET_CHALLENGE_RECT' };
+    const reply = (await chrome.tabs.sendMessage(tabId, msg, { frameId: 0 })) as
+      | ChallengeRectReply
+      | undefined;
+    return reply ?? null;
+  } catch {
+    return null;
+  }
+}
 
 /** Ask the challenge frame for tile/verify/refresh centres (iframe-local). */
 async function getGeometry(tabId: number, frameId: number): Promise<GeometryReply> {
@@ -160,22 +176,34 @@ function actionPause(): Promise<void> {
  * executor's sequencing: act → re-read geometry → click Verify/Next unless
  * it still reads "Skip" (an unregistered answer; clicking would throw the
  * challenge away — leave it and let the round re-arm / the watchdog end it).
- * Coordinates: vision points are normalized 0-1000 over `rect`; tile /
- * verify / refresh centres come from GET_GEOMETRY in iframe-local coords and
- * are offset by `rect`'s origin. Resolves false when nothing could be done
- * (attach failed, geometry unavailable) so the loop aborts the round.
+ * Coordinates: vision points are normalized 0-1000 over the challenge rect;
+ * tile / verify / refresh centres come from GET_GEOMETRY in iframe-local
+ * coords and are offset by the rect's origin. Resolves false when nothing
+ * could be done (attach failed, geometry unavailable) so the loop fails the
+ * round.
  */
 async function performAction(
   tabId: number,
   frameId: number,
   action: ExtAction,
-  rect: RectLike,
+  roundRect: RectLike,
 ): Promise<boolean> {
+  // The round rect was captured seconds ago, during recognize — the hCaptcha
+  // popup moves on scroll and CDP dispatches at ABSOLUTE top-frame coords, so
+  // a stale rect would send trusted clicks to arbitrary page locations.
+  // Re-fetch immediately before acting (vision's 0-1000 coords are relative
+  // to the iframe content, so the fresh rect is strictly more correct); fall
+  // back to the round rect only if the top frame can't answer.
+  const fresh = await getChallengeRect(tabId);
+  const rect: RectLike = fresh?.rect ?? roundRect;
+
   try {
     await input.attach(tabId);
   } catch (err) {
     // One CDP client per tab: DevTools (or another extension) already holds
-    // it. Not retryable from here — fail the action; the loop stands down.
+    // it. attach() liveness-probes the session, so a foreign holder rejects
+    // here — before any input or geometry work. Not retryable from here:
+    // fail the action; the loop fails the round loudly.
     console.warn('[nonecap] debugger attach failed (is DevTools open on this tab?)', err);
     return false;
   }
@@ -261,17 +289,7 @@ const recognizeWithBookkeeping = createRecognizeBookkeeper({
 });
 
 const loopDeps: LoopDeps = {
-  async getRect(tabId) {
-    try {
-      const msg: Msg = { t: 'GET_CHALLENGE_RECT' };
-      const reply = (await chrome.tabs.sendMessage(tabId, msg, { frameId: 0 })) as
-        | ChallengeRectReply
-        | undefined;
-      return reply ?? null;
-    } catch {
-      return null;
-    }
-  },
+  getRect: getChallengeRect,
   async capture(_tabId, windowId) {
     const dataUrl = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
     // Chrome occasionally resolves with undefined/'' (occluded window, quota
@@ -416,7 +434,14 @@ chrome.runtime.onMessage.addListener(
         void handleChallengeReady(msg, sender);
         return undefined;
       case 'CHALLENGE_GONE':
-        if (sender.tab?.id !== undefined) loop.onChallengeGone(sender.tab.id);
+        if (sender.tab?.id !== undefined) {
+          loop.onChallengeGone(sender.tab.id);
+          // Belt for an SW-reborn orphan session: onChallengeGone only emits
+          // a phase (→ detach) when an attempt exists, but the debugger can
+          // be attached without one after a service-worker restart. Idempotent
+          // (mirrors tabs.onRemoved below).
+          void input.detach(sender.tab.id);
+        }
         return undefined;
       case 'SOLVED':
         if (sender.tab?.id !== undefined) {
@@ -448,12 +473,10 @@ chrome.runtime.onMessage.addListener(
         // pages, so the pill's CTA delegates to the background.
         void chrome.runtime.openOptionsPage();
         return undefined;
-      // bg → frame messages; never handled here. (EXEC is deprecated — no
-      // longer sent; the variant lives until Phase 2 drops the frame handler.)
+      // bg → frame messages; never handled here.
       case 'GET_CHALLENGE_RECT':
       case 'GET_GEOMETRY':
       case 'CURSOR':
-      case 'EXEC':
       case 'PHASE':
         return undefined;
       default:

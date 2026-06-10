@@ -28,11 +28,11 @@ export type LoopDeps = {
   /**
    * Perform the recognized action with trusted (CDP) input, animating the
    * challenge frame's cosmetic cursor in sync. `rect` is the challenge
-   * iframe's top-frame viewport rect already fetched for this round's
-   * capture — the performer converts coordinates against it instead of
-   * fetching again. Injected from index.ts (the loop stays chrome-free);
-   * resolves false when the action could not be performed (e.g. debugger
-   * attach failed or the frame's geometry was unavailable).
+   * iframe's top-frame viewport rect fetched for this round's capture — the
+   * performer re-fetches a FRESH rect right before acting (the popup moves
+   * on scroll) and uses this one only as a fallback. Injected from index.ts
+   * (the loop stays chrome-free); resolves false when the action could not
+   * be performed (e.g. debugger attach failed or geometry was unavailable).
    */
   performAction(tabId: number, frameId: number, action: ExtAction, rect: RectLike): Promise<boolean>;
   /** Report a finished session to the API (fire-and-forget semantics). */
@@ -328,7 +328,10 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
     }
     if (token.cancelled) return;
     if (!done) {
-      abortQuiet(tabId, attempt);
+      // The recognize above already charged this round — a quiet stand-down
+      // would hide a billed failure. Loud: error pill + linger. (Pre-charge
+      // failures — rect/capture/crop — stay abortQuiet above.)
+      failLoud(tabId, attempt, true);
       return;
     }
 

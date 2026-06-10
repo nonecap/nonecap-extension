@@ -61,11 +61,6 @@ export type Msg =
   // viewport coords; the frame only animates the cosmetic cursor — the
   // background owns sequencing and dispatches the real (trusted CDP) input.
   | { t: 'CURSOR'; op: CursorOp; x?: number; y?: number }
-  // DEPRECATED (kept one phase for the challenge frame's handler): the
-  // background no longer sends EXEC — real input is dispatched as trusted CDP
-  // events from the background. Phase 2 removes the frame handler, then this
-  // variant and ExecReply are deleted.
-  | { t: 'EXEC'; action: ExtAction } // @deprecated bg → challenge frame; reply: { done: boolean }
   | { t: 'PHASE'; phase: Phase; detail?: { secs?: string; credits?: number } } // bg → top frame + popup
   | { t: 'SOLVED'; secs: number } // top frame → bg
   | { t: 'OPEN_OPTIONS' } // top frame → bg; no reply (content scripts cannot open extension pages)
@@ -79,9 +74,6 @@ export type ChallengeRectReply = { rect: RectLike; dpr: number } | null;
 
 /** Reply to GET_GEOMETRY. */
 export type GeometryReply = Geometry | null;
-
-/** @deprecated Reply to the deprecated EXEC message — deleted with it in Phase 2. */
-export type ExecReply = { done: boolean };
 
 /** Reply to CONNECT_KEY. */
 export type ConnectKeyReply = { ok: boolean };

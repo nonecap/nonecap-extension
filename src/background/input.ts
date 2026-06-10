@@ -51,12 +51,15 @@ export interface CdpTransport {
 }
 
 export type InputDriverDeps = {
-  now(): number;
   delay(ms: number): Promise<void>;
 };
 
 export type InputDriver = {
-  /** Idempotent: a tab this driver already attached is not re-attached. */
+  /**
+   * Idempotent: a tab this driver already attached is not re-attached.
+   * A fresh attach is liveness-probed with one cheap CDP command, so a
+   * session actually held by a foreign client (DevTools) rejects here.
+   */
   attach(tabId: number): Promise<void>;
   /** Best-effort + idempotent: transport errors are swallowed. */
   detach(tabId: number): Promise<void>;
@@ -74,6 +77,16 @@ function ease(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
 }
 
+/** ±40% jitter on a per-step delay — a fixed motion tick is trivially robotic. */
+function jitter(ms: number): number {
+  return ms * (0.6 + Math.random() * 0.8);
+}
+
+/** ~1px positional noise for MID-path move points (endpoints stay exact). */
+function noise(): number {
+  return (Math.random() - 0.5) * 2;
+}
+
 type MouseEventType = 'mousePressed' | 'mouseReleased' | 'mouseMoved';
 
 export function createInputDriver(cdp: CdpTransport, deps: InputDriverDeps): InputDriver {
@@ -81,7 +94,7 @@ export function createInputDriver(cdp: CdpTransport, deps: InputDriverDeps): Inp
   /** Last dispatched position per tab — approach trails start from here. */
   const lastPos = new Map<number, Pt>();
 
-  function mouse(
+  async function mouse(
     tabId: number,
     type: MouseEventType,
     x: number,
@@ -99,8 +112,10 @@ export function createInputDriver(cdp: CdpTransport, deps: InputDriverDeps): Inp
       buttons: pressed ? 1 : 0,
     };
     if (type !== 'mouseMoved') params['clickCount'] = 1;
+    await cdp.send(tabId, 'Input.dispatchMouseEvent', params);
+    // Recorded only AFTER the dispatch resolved — a rejected send must not
+    // pretend the cursor reached a position it never did.
     lastPos.set(tabId, { x, y });
-    return cdp.send(tabId, 'Input.dispatchMouseEvent', params);
   }
 
   /**
@@ -115,14 +130,29 @@ export function createInputDriver(cdp: CdpTransport, deps: InputDriverDeps): Inp
     const steps = 5 + Math.floor(Math.random() * 4); // 5-8 approach moves
     for (let i = 1; i <= steps; i++) {
       const e = ease(i / steps);
-      await mouse(tabId, 'mouseMoved', from.x + (x - from.x) * e, from.y + (y - from.y) * e, false);
-      await deps.delay(14);
+      // Mid-path points get ~1px noise; the LAST move lands exactly on target
+      // (the press must dispatch where the trail ended).
+      const last = i === steps;
+      await mouse(
+        tabId,
+        'mouseMoved',
+        from.x + (x - from.x) * e + (last ? 0 : noise()),
+        from.y + (y - from.y) * e + (last ? 0 : noise()),
+        false,
+      );
+      await deps.delay(jitter(14));
     }
   }
 
   async function attach(tabId: number): Promise<void> {
     if (attached.has(tabId)) return;
     await cdp.attach(tabId); // failure (e.g. DevTools attached) propagates
+    // Chrome reports "already attached" for OUR orphaned session (SW restart)
+    // AND for a foreign client (DevTools) alike, and the transport swallows
+    // both. Probe liveness with one cheap, side-effect-free command so a
+    // session we don't actually hold fails HERE — before any real input —
+    // instead of mid-action after the round was already charged.
+    await cdp.send(tabId, 'Input.setIgnoreInputEvents', { ignore: false });
     attached.add(tabId);
   }
 
@@ -164,12 +194,16 @@ export function createInputDriver(cdp: CdpTransport, deps: InputDriverDeps): Inp
       const stepDelay = Math.max(350, Math.min(1150, dist * 1.3)) / steps;
       for (let i = 1; i <= steps; i++) {
         const e = ease(i / steps);
-        const x = from.x + (to.x - from.x) * e;
+        // Mid-path points get ~1px noise (a perfectly eased, strictly
+        // monotonic line is robotic); the LAST move lands exactly on target
+        // so the release dispatches where the drag ended.
+        const last = i === steps;
+        const x = from.x + (to.x - from.x) * e + (last ? 0 : noise());
         // Small sin-wave vertical drift, fading out at the endpoints.
-        const driftY = i === steps ? 0 : Math.sin(e * Math.PI) * -3;
+        const driftY = last ? 0 : Math.sin(e * Math.PI) * -3 + noise();
         const y = from.y + (to.y - from.y) * e + driftY;
         await mouse(tabId, 'mouseMoved', x, y, true);
-        await deps.delay(stepDelay);
+        await deps.delay(jitter(stepDelay));
       }
 
       await mouse(tabId, 'mouseReleased', to.x, to.y, false);

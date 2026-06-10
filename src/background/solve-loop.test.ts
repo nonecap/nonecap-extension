@@ -143,7 +143,8 @@ describe('createSolveLoop', () => {
       expect.objectContaining({ task: 'grid', host: 'example.com', session: null }),
     );
     // performAction receives the action AND the round's already-fetched rect
-    // (the loop must not fetch it twice).
+    // (the loop must not fetch it twice — the performer re-fetches a fresh
+    // rect itself and uses this one only as a fallback).
     expect(h.deps.performAction).toHaveBeenCalledWith(
       1,
       7,
@@ -271,6 +272,37 @@ describe('createSolveLoop', () => {
     expect(h.delayCalls.filter((ms) => ms === CAPTURE_SPACING_MS).length).toBeGreaterThanOrEqual(
       CAPTURE_RETRIES,
     );
+    expect(loop.getPhase(1)).toBe('idle');
+  });
+
+  it('performAction failing AFTER a charged recognize fails loud: error pill + outcome failed', async () => {
+    const h = makeHarness();
+    h.queue(ok('s1'));
+    h.deps.performAction = vi.fn(async () => false);
+    const loop = createSolveLoop(h.deps);
+
+    loop.onChallengeReady(1, 10, 7, 'grid', 'example.com');
+    await h.runAll();
+
+    // The round was billed (recognize succeeded) — never a silent idle.
+    expect(h.outcomes).toEqual([{ session: 's1', result: 'failed', rounds: 1 }]);
+    expect(h.phaseNames()).toEqual(['solving', 'error', 'idle']);
+    expect(loop.getPhase(1)).toBe('idle');
+  });
+
+  it('performAction throwing AFTER a charged recognize also fails loud', async () => {
+    const h = makeHarness();
+    h.queue(ok('s2'));
+    h.deps.performAction = vi.fn(async () => {
+      throw new Error('debugger went away');
+    });
+    const loop = createSolveLoop(h.deps);
+
+    loop.onChallengeReady(1, 10, 7, 'grid', 'example.com');
+    await h.runAll();
+
+    expect(h.outcomes).toEqual([{ session: 's2', result: 'failed', rounds: 1 }]);
+    expect(h.phaseNames()).toEqual(['solving', 'error', 'idle']);
     expect(loop.getPhase(1)).toBe('idle');
   });
 

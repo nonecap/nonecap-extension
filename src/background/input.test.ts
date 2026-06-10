@@ -1,5 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it } from 'vitest';
 import {
+  chromeDebuggerTransport,
   createInputDriver,
   localToTop,
   normalizedToTop,
@@ -19,7 +20,9 @@ type Sent = {
   };
 };
 
-function makeHarness(opts: { attachError?: Error; detachError?: Error } = {}) {
+function makeHarness(
+  opts: { attachError?: Error; detachError?: Error; sendError?: Error } = {},
+) {
   const sends: Sent[] = [];
   const attaches: number[] = [];
   const detaches: number[] = [];
@@ -35,12 +38,12 @@ function makeHarness(opts: { attachError?: Error; detachError?: Error } = {}) {
       if (opts.detachError) throw opts.detachError;
     },
     async send(tabId, method, params) {
+      if (opts.sendError) throw opts.sendError;
       sends.push({ tabId, method, params } as Sent);
     },
   };
 
   const driver = createInputDriver(cdp, {
-    now: () => 0,
     delay: async (ms) => {
       delays.push(ms);
     },
@@ -99,7 +102,7 @@ describe('createInputDriver', () => {
     expect(dwell).toBeLessThanOrEqual(100);
   });
 
-  it('drag: press at from → 14-18 held eased moves monotonic toward the target → release at to', async () => {
+  it('drag: press at from → 14-18 held eased moves toward the target (≤1px noise) → release at to', async () => {
     const h = makeHarness();
     const from = { x: 10, y: 20 };
     const to = { x: 200, y: 150 };
@@ -114,7 +117,8 @@ describe('createInputDriver', () => {
     expect(press).toMatchObject({ x: 10, y: 20, buttons: 1, clickCount: 1 });
 
     // Held moves between press and release: buttons:1, 14-18 of them,
-    // x strictly progressing toward the target and landing on it.
+    // x progressing toward the target (mid-path points carry ~1px noise, so
+    // allow a tiny regression) and landing EXACTLY on it.
     const held = h.sends.slice(pressIdx + 1, releaseIdx);
     expect(held.length).toBeGreaterThanOrEqual(14);
     expect(held.length).toBeLessThanOrEqual(18);
@@ -122,14 +126,25 @@ describe('createInputDriver', () => {
     expect(held.every((s) => s.params.buttons === 1)).toBe(true);
     let prevX = from.x;
     for (const move of held) {
-      expect(move.params.x).toBeGreaterThanOrEqual(prevX);
-      expect(move.params.x).toBeLessThanOrEqual(to.x);
+      expect(move.params.x).toBeGreaterThanOrEqual(prevX - 2);
+      expect(move.params.x).toBeLessThanOrEqual(to.x + 1);
       prevX = move.params.x;
     }
     expect(held.at(-1)!.params).toMatchObject({ x: 200, y: 150 });
 
     const release = h.sends[releaseIdx]!.params;
     expect(release).toMatchObject({ x: 200, y: 150, buttons: 0, clickCount: 1 });
+  });
+
+  it('drag/approach: per-step delays are jittered, not one fixed tick', async () => {
+    const h = makeHarness();
+    await h.driver.drag(1, { x: 10, y: 20 }, { x: 200, y: 150 });
+    // delays: approach ticks → press dwell → held-move steps. The held-move
+    // steps share one base stepDelay but each carries ±40% jitter — a fixed
+    // metronome tick would make every value identical.
+    const stepDelays = h.delays.slice(h.delays.findIndex((ms) => ms >= 40) + 1);
+    expect(stepDelays.length).toBeGreaterThanOrEqual(14);
+    expect(new Set(stepDelays.map((ms) => ms.toFixed(6))).size).toBeGreaterThan(1);
   });
 
   it('attach is idempotent per tab; detach is best-effort and swallows transport errors', async () => {
@@ -139,6 +154,8 @@ describe('createInputDriver', () => {
     await h.driver.attach(7);
     expect(h.attaches).toEqual([7]); // second attach is a no-op
     expect(h.driver.isAttached(7)).toBe(true);
+    // A fresh attach liveness-probes the session with ONE cheap command.
+    expect(h.sends.map((s) => s.method)).toEqual(['Input.setIgnoreInputEvents']);
 
     await expect(h.driver.detach(7)).resolves.toBeUndefined(); // error swallowed
     expect(h.detaches).toEqual([7]);
@@ -152,6 +169,14 @@ describe('createInputDriver', () => {
     expect(h.driver.isAttached(3)).toBe(false);
   });
 
+  it('attach liveness-probe failure (DevTools holds the session) propagates, tab unattached', async () => {
+    // The transport swallows "already attached" even for a FOREIGN client, so
+    // cdp.attach resolves — the probe send is what exposes the dead session.
+    const h = makeHarness({ sendError: new Error('Debugger is not attached to the tab') });
+    await expect(h.driver.attach(3)).rejects.toThrow('not attached');
+    expect(h.driver.isAttached(3)).toBe(false);
+  });
+
   it('markDetached resets driver state so the next attach re-attaches', async () => {
     const h = makeHarness();
     await h.driver.attach(5);
@@ -159,5 +184,70 @@ describe('createInputDriver', () => {
     expect(h.driver.isAttached(5)).toBe(false);
     await h.driver.attach(5);
     expect(h.attaches).toEqual([5, 5]);
+  });
+});
+
+describe('chromeDebuggerTransport error filtering', () => {
+  const g = globalThis as { chrome?: unknown };
+  const originalChrome = g.chrome;
+  afterEach(() => {
+    g.chrome = originalChrome;
+  });
+
+  /** Minimal fake chrome.debugger; only attach/detach matter here. */
+  function stubDebugger(overrides: {
+    attach?: () => Promise<void>;
+    detach?: () => Promise<void>;
+  }): void {
+    g.chrome = {
+      debugger: {
+        attach: overrides.attach ?? (async () => {}),
+        detach: overrides.detach ?? (async () => {}),
+        sendCommand: async () => {},
+      },
+    };
+  }
+
+  it('attach swallows Chrome\'s canonical "already attached" error', async () => {
+    stubDebugger({
+      attach: async () => {
+        throw new Error('Another debugger is already attached to the tab with id: 5.');
+      },
+    });
+    await expect(chromeDebuggerTransport.attach(5)).resolves.toBeUndefined();
+  });
+
+  it('attach rethrows any other error', async () => {
+    stubDebugger({
+      attach: async () => {
+        throw new Error('Cannot access a chrome:// URL');
+      },
+    });
+    await expect(chromeDebuggerTransport.attach(5)).rejects.toThrow('chrome://');
+  });
+
+  it('detach swallows the canonical "not attached" and "no tab with given id" errors', async () => {
+    stubDebugger({
+      detach: async () => {
+        throw new Error('Debugger is not attached to the tab with id: 5.');
+      },
+    });
+    await expect(chromeDebuggerTransport.detach(5)).resolves.toBeUndefined();
+
+    stubDebugger({
+      detach: async () => {
+        throw new Error('No tab with given id 5.');
+      },
+    });
+    await expect(chromeDebuggerTransport.detach(5)).resolves.toBeUndefined();
+  });
+
+  it('detach rethrows any other error', async () => {
+    stubDebugger({
+      detach: async () => {
+        throw new Error('Internal error while detaching');
+      },
+    });
+    await expect(chromeDebuggerTransport.detach(5)).rejects.toThrow('Internal error');
   });
 });

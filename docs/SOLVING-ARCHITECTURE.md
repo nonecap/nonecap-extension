@@ -78,3 +78,11 @@ round re-arms / the watchdog ends the attempt cleanly instead of skip-spamming.
 - **Permission cost.** Adds the `debugger` permission, which carries a stronger
   install warning and stricter Chrome Web Store review. Accepted tradeoff: it is
   the only way to solve drag/point puzzles.
+
+## Residual risk
+
+- A hostile page embedding a real hCaptcha widget could reposition or overlay
+  the challenge iframe so trusted clicks land on page-chosen targets. The
+  background re-fetches the challenge rect immediately before acting, which
+  shrinks — but does not eliminate — the window between measuring and
+  dispatching.
