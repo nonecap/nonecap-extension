@@ -92,6 +92,22 @@ export function findVerify(doc: Document): Element | null {
   return firstMatch(doc, VERIFY_SELECTORS);
 }
 
+/**
+ * The submit button only when it is safe to click — i.e. NOT showing "Skip".
+ * hCaptcha reuses the same `.button-submit` element for Verify/Next AND Skip:
+ * it reads "Skip" until an answer has actually been placed on the challenge.
+ * Clicking it then skips the challenge (a guaranteed fail), so we refuse,
+ * mirroring the internal solver's "Never Skip" rule. Returns null when the
+ * button is missing or reads Skip in any locale-stripped form.
+ */
+export function findSubmitUnlessSkip(doc: Document): Element | null {
+  const btn = firstMatch(doc, VERIFY_SELECTORS);
+  if (!btn) return null;
+  const label = (btn.textContent ?? '').trim();
+  if (/^skip$/i.test(label)) return null;
+  return btn;
+}
+
 /** The challenge frame's refresh button. */
 export function findRefresh(doc: Document): Element | null {
   return firstMatch(doc, REFRESH_SELECTORS);

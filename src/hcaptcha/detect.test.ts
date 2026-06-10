@@ -4,6 +4,7 @@ import {
   findCheckbox,
   findRefresh,
   findVerify,
+  findSubmitUnlessSkip,
   frameKind,
   gridReady,
   singleReady,
@@ -148,6 +149,18 @@ describe('element finders', () => {
     setBody(gridTiles(9));
     expect(findVerify(document)?.textContent).toBe('Verify');
     expect(findVerify(setBody('<div class="challenge"></div>'))).toBeNull();
+  });
+
+  it('findSubmitUnlessSkip refuses a Skip button but returns a real Verify', () => {
+    // hCaptcha reuses .button-submit for both; it reads "Skip" until an answer
+    // is placed. Clicking it then would skip the challenge.
+    setBody('<div class="challenge"><button class="button-submit">Verify</button></div>');
+    expect(findSubmitUnlessSkip(document)?.textContent).toBe('Verify');
+    setBody('<div class="challenge"><button class="button-submit"> Skip </button></div>');
+    expect(findSubmitUnlessSkip(document)).toBeNull();
+    setBody('<div class="challenge"><button class="button-submit">SKIP</button></div>');
+    expect(findSubmitUnlessSkip(document)).toBeNull();
+    expect(findSubmitUnlessSkip(setBody('<div class="challenge"></div>'))).toBeNull();
   });
 
   it('findRefresh follows the fallback order', () => {

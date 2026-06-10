@@ -16,7 +16,7 @@
 
 import type { ExtAction, Pt } from '../shared/messages';
 import { assertNever } from '../shared/messages';
-import { findRefresh, findVerify, tileAt } from './detect';
+import { findRefresh, findSubmitUnlessSkip, tileAt } from './detect';
 import { ncEase, ncWait } from './tween';
 
 /**
@@ -240,7 +240,11 @@ async function clickPoint(doc: Document, cursor: Cursor, x: number, y: number, w
 }
 
 async function clickVerifyIfPresent(doc: Document, cursor: Cursor, speed: number, wait: WaitFn): Promise<void> {
-  const verify = findVerify(doc);
+  // Only click a real Verify/Next. If the button still reads "Skip" the answer
+  // never registered (e.g. a drag the canvas ignored), and clicking it would
+  // skip the challenge. Leaving it unclicked lets the round re-arm and retry,
+  // and the background watchdog ends the attempt cleanly if it never resolves.
+  const verify = findSubmitUnlessSkip(doc);
   if (!verify) return;
   await humanPause(speed, wait);
   await clickElement(doc, cursor, verify, wait);
