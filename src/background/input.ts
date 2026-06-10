@@ -72,6 +72,57 @@ export type InputDriver = {
   drag(tabId: number, from: Pt, to: Pt): Promise<void>;
 };
 
+// ---------------------------------------------------------------------------
+// Motion timing constants. These are NOT cosmetic — they bound how long the
+// driver can run silently (issuing only CDP input, no CURSOR/GET_GEOMETRY
+// messages to the challenge frame) during a single action. The challenge
+// frame's re-arm probe (REARM_FLOOR_MS in ../hcaptcha/challenge-state) is
+// pushed forward by every CURSOR/GET_GEOMETRY message, so if the worst-case
+// gap between two background messages during one action ever approaches that
+// floor, the frame spuriously re-announces mid-action (cancelling the live
+// round + burning a recognize on a mid-drag screenshot). maxActionGapMs()
+// exposes that worst-case bound; timing-contract.test.ts asserts it stays
+// safely under REARM_FLOOR_MS so any future bump here trips CI.
+
+/** Approach (unpressed) move steps: inclusive range, 5-8. */
+const APPROACH_STEPS_MIN = 5;
+const APPROACH_STEPS_MAX = 8;
+/** Per-approach-step base delay (before jitter). */
+const APPROACH_TICK_MS = 14;
+
+/** Physical press dwell window before a release / first drag move. */
+const PRESS_DWELL_MIN_MS = 40;
+const PRESS_DWELL_MAX_MS = 100;
+
+/** Held-drag move steps: inclusive range, 14-18. */
+const DRAG_STEPS_MIN = 14;
+const DRAG_STEPS_MAX = 18;
+/** Total drag-move time (before jitter) is dist×factor clamped to [min, max]. */
+const DRAG_TOTAL_MIN_MS = 350;
+const DRAG_TOTAL_MAX_MS = 1150;
+const DRAG_DIST_FACTOR = 1.3;
+
+/** Per-step jitter band: delay × (min..max). Max factor is the gap-budget driver. */
+const JITTER_MIN_FACTOR = 0.6;
+const JITTER_MAX_FACTOR = 1.4;
+
+/**
+ * Worst-case silent gap (ms) between two consecutive background→frame messages
+ * during a single action — i.e. the drag bracket: CURSOR 'press' is sent, then
+ * the driver runs approach + press dwell + the full held-drag silently before
+ * the next CURSOR 'move'. All legs taken at their all-max-jitter ceiling:
+ *
+ *   approach(8×14×1.4) + dwell(100) + dragTotal(1150×1.4)
+ *
+ * This MUST stay comfortably below REARM_FLOOR_MS or the challenge frame's
+ * re-arm probe fires mid-action. See timing-contract.test.ts (the tripwire).
+ */
+export function maxActionGapMs(): number {
+  const approachMax = APPROACH_STEPS_MAX * APPROACH_TICK_MS * JITTER_MAX_FACTOR;
+  const dragTotalMax = DRAG_TOTAL_MAX_MS * JITTER_MAX_FACTOR;
+  return approachMax + PRESS_DWELL_MAX_MS + dragTotalMax;
+}
+
 /** Cubic ease in/out (same curve as the old in-frame executor). */
 function ease(t: number): number {
   return t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2;
@@ -79,7 +130,7 @@ function ease(t: number): number {
 
 /** ±40% jitter on a per-step delay — a fixed motion tick is trivially robotic. */
 function jitter(ms: number): number {
-  return ms * (0.6 + Math.random() * 0.8);
+  return ms * (JITTER_MIN_FACTOR + Math.random() * (JITTER_MAX_FACTOR - JITTER_MIN_FACTOR));
 }
 
 /** ~1px positional noise for MID-path move points (endpoints stay exact). */
@@ -127,7 +178,8 @@ export function createInputDriver(cdp: CdpTransport, deps: InputDriverDeps): Inp
     const from = lastPos.get(tabId) ?? { x: x - 60 - Math.random() * 60, y: y - 40 - Math.random() * 40 };
     const dist = Math.hypot(x - from.x, y - from.y);
     if (dist < 2) return;
-    const steps = 5 + Math.floor(Math.random() * 4); // 5-8 approach moves
+    const steps =
+      APPROACH_STEPS_MIN + Math.floor(Math.random() * (APPROACH_STEPS_MAX - APPROACH_STEPS_MIN + 1));
     for (let i = 1; i <= steps; i++) {
       const e = ease(i / steps);
       // Mid-path points get ~1px noise; the LAST move lands exactly on target
@@ -140,7 +192,7 @@ export function createInputDriver(cdp: CdpTransport, deps: InputDriverDeps): Inp
         from.y + (y - from.y) * e + (last ? 0 : noise()),
         false,
       );
-      await deps.delay(jitter(14));
+      await deps.delay(jitter(APPROACH_TICK_MS));
     }
   }
 
@@ -180,18 +232,20 @@ export function createInputDriver(cdp: CdpTransport, deps: InputDriverDeps): Inp
       await mouse(tabId, 'mousePressed', x, y, true);
       // Physical press dwell — deliberately NOT scaled by anything: a fast
       // solver still holds the button for ~40-100ms.
-      await deps.delay(40 + Math.random() * 60);
+      await deps.delay(PRESS_DWELL_MIN_MS + Math.random() * (PRESS_DWELL_MAX_MS - PRESS_DWELL_MIN_MS));
       await mouse(tabId, 'mouseReleased', x, y, false);
     },
 
     async drag(tabId, from, to) {
       await approach(tabId, from.x, from.y);
       await mouse(tabId, 'mousePressed', from.x, from.y, true);
-      await deps.delay(40 + Math.random() * 60);
+      await deps.delay(PRESS_DWELL_MIN_MS + Math.random() * (PRESS_DWELL_MAX_MS - PRESS_DWELL_MIN_MS));
 
       const dist = Math.hypot(to.x - from.x, to.y - from.y);
-      const steps = 14 + Math.floor(Math.random() * 5); // 14-18 held moves
-      const stepDelay = Math.max(350, Math.min(1150, dist * 1.3)) / steps;
+      const steps =
+        DRAG_STEPS_MIN + Math.floor(Math.random() * (DRAG_STEPS_MAX - DRAG_STEPS_MIN + 1));
+      const stepDelay =
+        Math.max(DRAG_TOTAL_MIN_MS, Math.min(DRAG_TOTAL_MAX_MS, dist * DRAG_DIST_FACTOR)) / steps;
       for (let i = 1; i <= steps; i++) {
         const e = ease(i / steps);
         // Mid-path points get ~1px noise (a perfectly eased, strictly

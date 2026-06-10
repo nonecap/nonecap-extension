@@ -145,7 +145,14 @@ async function getChallengeRect(tabId: number): Promise<ChallengeRectReply> {
   }
 }
 
-/** Ask the challenge frame for tile/verify/refresh centres (iframe-local). */
+/**
+ * Ask the challenge frame for tile/verify/refresh centres (iframe-local).
+ *
+ * SIDE EFFECT: answering GET_GEOMETRY disarms the frame's ready edge and
+ * (re)starts its re-arm probe (challenge-state.noteAction). Never issue a
+ * speculative geometry read before recognize — a stray GET_GEOMETRY suppresses
+ * a legitimate CHALLENGE_READY. Only read geometry inside performAction.
+ */
 async function getGeometry(tabId: number, frameId: number): Promise<GeometryReply> {
   try {
     const msg: Msg = { t: 'GET_GEOMETRY' };
@@ -158,7 +165,18 @@ async function getGeometry(tabId: number, frameId: number): Promise<GeometryRepl
   }
 }
 
-/** Fire-and-forget cosmetic-cursor op to the challenge frame. */
+/**
+ * Fire-and-forget cosmetic-cursor op to the challenge frame.
+ *
+ * RE-ARM HEARTBEAT: CURSOR (and GET_GEOMETRY) double as the challenge frame's
+ * re-arm heartbeat — each one pushes the frame's re-arm probe floor forward by
+ * REARM_FLOOR_MS (challenge-state.noteAction). Dropping these mid-action, or
+ * letting the gap between two of them within a single action approach
+ * REARM_FLOOR_MS, makes the frame spuriously re-announce mid-action (cancelling
+ * the round + burning a recognize on a mid-drag screenshot). The worst-case gap
+ * is the drag bracket below; input.maxActionGapMs() bounds it and
+ * timing-contract.test.ts asserts it stays under REARM_FLOOR_MS.
+ */
 function sendCursor(tabId: number, frameId: number, op: CursorOp, p?: Pt): void {
   const msg: Msg = { t: 'CURSOR', op, ...(p !== undefined ? { x: p.x, y: p.y } : {}) };
   void chrome.tabs.sendMessage(tabId, msg, { frameId }).catch(() => {
@@ -253,6 +271,11 @@ async function performAction(
         const toLocal = { x: (move.to.x / 1000) * rect.width, y: (move.to.y / 1000) * rect.height };
         sendCursor(tabId, frameId, 'move', fromLocal);
         sendCursor(tabId, frameId, 'press');
+        // The widest silent gap in any action: between this CURSOR 'press' and
+        // the CURSOR 'move' below, input.drag() runs approach + dwell + the
+        // full held-drag with NO message to the frame. That gap (bounded by
+        // input.maxActionGapMs()) must stay under REARM_FLOOR_MS or the frame
+        // re-arms mid-drag — see sendCursor + timing-contract.test.ts.
         await input.drag(tabId, normalizedToTop(move.from, rect), normalizedToTop(move.to, rect));
         sendCursor(tabId, frameId, 'move', toLocal);
         sendCursor(tabId, frameId, 'release');

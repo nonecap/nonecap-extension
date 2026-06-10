@@ -115,12 +115,6 @@ export function findRefresh(doc: Document): Element | null {
   return firstMatch(doc, REFRESH_SELECTORS);
 }
 
-/** 1-based reading-order tile lookup (reading order = DOM order). */
-export function tileAt(doc: Document, n: number): Element | null {
-  if (!Number.isInteger(n) || n < 1) return null;
-  return doc.querySelectorAll('.task-image')[n - 1] ?? null;
-}
-
 /** Bounding-rect centre in this frame's CSS viewport coords. */
 export function centerOf(el: Element): Pt {
   const r = el.getBoundingClientRect();

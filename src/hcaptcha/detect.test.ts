@@ -11,7 +11,6 @@ import {
   gridReady,
   singleReady,
   taskHint,
-  tileAt,
 } from './detect';
 
 function setBody(html: string): Document {
@@ -255,22 +254,5 @@ describe('geometry', () => {
     expect(geometry(setBody('<div id="anchor"><div id="checkbox"></div></div>'))).toBeNull();
     expect(geometry(setBody(''))).toBeNull();
     expect(geometry(setBody('<div class="something-else"></div>'))).toBeNull();
-  });
-});
-
-describe('tileAt', () => {
-  it('returns tiles 1-based in DOM (reading) order', () => {
-    setBody(gridTiles(9));
-    expect(tileAt(document, 1)?.getAttribute('data-n')).toBe('1');
-    expect(tileAt(document, 5)?.getAttribute('data-n')).toBe('5');
-    expect(tileAt(document, 9)?.getAttribute('data-n')).toBe('9');
-  });
-
-  it('returns null out of range or for non-positive / fractional indices', () => {
-    setBody(gridTiles(4));
-    expect(tileAt(document, 0)).toBeNull();
-    expect(tileAt(document, 5)).toBeNull();
-    expect(tileAt(document, -1)).toBeNull();
-    expect(tileAt(document, 1.5)).toBeNull();
   });
 });
