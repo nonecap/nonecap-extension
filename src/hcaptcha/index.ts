@@ -16,7 +16,8 @@
 
 import type { ExecReply, Msg } from '../shared/messages';
 import { get } from '../shared/storage';
-import { findCheckbox, frameKind, gridReady, singleReady, taskHint } from './detect';
+import { findCheckbox, frameKind } from './detect';
+import { createChallengeController } from './challenge-state';
 import { AnimatedCursor } from './cursor';
 import { clickElement, exec } from './executor';
 import { ncWait } from './tween';
@@ -29,8 +30,6 @@ declare global {
 }
 
 const POLL_MS = 250;
-const STABLE_MS_GRID = 300;
-const STABLE_MS_SINGLE = 500;
 
 // ---- state ----------------------------------------------------------------
 
@@ -40,12 +39,18 @@ let executing = false;
 // anchor frame
 let checkboxAnnounced = false;
 
-// challenge frame (edge-triggered readiness)
+// challenge frame
 let sawContainer = false;
 let goneSent = false;
-/** True when we may announce the next ready state (re-set by a not-ready observation). */
-let armed = true;
-let lastDomChangeAt = 0;
+
+/**
+ * Edge-triggered readiness + post-exec re-arm probe (atomic single-challenge
+ * round swaps never pass through not-ready). Logic lives in challenge-state.ts.
+ */
+const challenge = createChallengeController({
+  doc: document,
+  sendReady: (task) => send({ t: 'CHALLENGE_READY', task }),
+});
 
 // ---- helpers ----------------------------------------------------------------
 
@@ -108,31 +113,10 @@ function tickAnchor(): void {
 
 // ---- challenge frame ----------------------------------------------------------
 
-function resetChallengeState(): void {
-  armed = true;
-  goneSent = false;
-}
-
-function tickChallenge(): void {
-  if (executing) return;
-  const hint = taskHint(document);
-  const ready = hint === 'grid' ? gridReady(document) : singleReady(document);
-  if (!ready) {
-    // Passing through not-ready re-arms the ready edge (e.g. next round's
-    // placeholders after an EXEC invalidated the previous state).
-    armed = true;
-    return;
-  }
-  if (!armed) return;
-  const stableMs = hint === 'single' ? STABLE_MS_SINGLE : STABLE_MS_GRID;
-  if (Date.now() - lastDomChangeAt < stableMs) return; // wait for DOM to settle
-  armed = false;
-  send({ t: 'CHALLENGE_READY', task: hint });
-}
-
 function sendGone(): void {
   if (!sawContainer || goneSent) return;
   goneSent = true;
+  challenge.teardown(); // cancels the post-exec re-arm probe
   cursor?.destroy();
   cursor = null;
   send({ t: 'CHALLENGE_GONE' });
@@ -147,10 +131,9 @@ function tick(): void {
     return;
   }
   if (kind === 'challenge') {
-    if (sawContainer && goneSent) resetChallengeState(); // a new challenge appeared
     sawContainer = true;
     goneSent = false;
-    tickChallenge();
+    challenge.tick();
     return;
   }
   // No challenge container (anymore): if we had one, report it gone.
@@ -186,7 +169,7 @@ function relevantMutation(records: MutationRecord[]): boolean {
 function init(): void {
   const observer = new MutationObserver((records) => {
     if (!relevantMutation(records)) return;
-    lastDomChangeAt = Date.now();
+    challenge.onMutation();
     scheduleTick();
   });
   observer.observe(document.documentElement, {
@@ -217,6 +200,7 @@ function init(): void {
       }
       void (async () => {
         executing = true;
+        challenge.execStarted();
         try {
           const speed = await speedFromSettings();
           const done = await exec(msg.action, ensureCursor(speed), speed);
@@ -226,10 +210,11 @@ function init(): void {
           sendResponse({ done: false });
         } finally {
           executing = false;
-          // Invalidate the previous ready state: the next CHALLENGE_READY only
-          // fires after the DOM passes through not-ready and settles again.
-          armed = false;
-          lastDomChangeAt = Date.now();
+          // Disarm + start the re-arm probe: the next CHALLENGE_READY fires
+          // via not-ready→ready (grids) or via the probe when the challenge
+          // is still present and ready after the floor (atomic single swaps,
+          // rejected answers).
+          challenge.execFinished();
         }
       })();
       return true; // keep the message channel open for the async reply
