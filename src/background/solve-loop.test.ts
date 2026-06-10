@@ -5,6 +5,7 @@ import {
   CAPTURE_RETRIES,
   CAPTURE_SPACING_MS,
   MAX_ROUNDS,
+  ROUND_STALL_MS,
   TRANSIENT_RETRY_MS,
   createSolveLoop,
   type LoopDeps,
@@ -25,33 +26,45 @@ function err(kind: ApiErrorKind): RecognizeResult {
 function makeHarness() {
   let now = 0;
   let seq = 0;
-  const pending: { at: number; seq: number; resolve: () => void }[] = [];
+  const pending: { at: number; ms: number; seq: number; resolve: () => void }[] = [];
 
   const sleep = (ms: number): Promise<void> =>
     new Promise((resolve) => {
-      pending.push({ at: now + ms, seq: seq++, resolve });
+      pending.push({ at: now + ms, ms, seq: seq++, resolve });
     });
 
   /** Flush all microtasks queued so far (a macrotask runs after them). */
   const flush = (): Promise<void> => new Promise((resolve) => setTimeout(resolve, 0));
 
-  /** Drive the fake clock until no work is left. */
-  async function runAll(): Promise<void> {
+  /**
+   * Drive the fake clock until no work is left. Watchdog-length delays
+   * (≥ ROUND_STALL_MS) are deliberately left pending: events in these tests
+   * arrive "in time", like the real world — use expire() to let them fire.
+   */
+  async function drive(includeStall: boolean): Promise<void> {
+    const eligible = () =>
+      pending.filter((p) => includeStall || p.ms < ROUND_STALL_MS);
     for (let guard = 0; guard < 1000; guard++) {
       await flush();
-      if (pending.length === 0) {
+      let candidates = eligible();
+      if (candidates.length === 0) {
         await flush();
-        if (pending.length === 0) return;
-        continue;
+        candidates = eligible();
+        if (candidates.length === 0) return;
       }
-      pending.sort((a, b) => a.at - b.at || a.seq - b.seq);
-      const next = pending.shift();
+      candidates.sort((a, b) => a.at - b.at || a.seq - b.seq);
+      const next = candidates[0];
       if (!next) continue;
+      pending.splice(pending.indexOf(next), 1);
       now = Math.max(now, next.at);
       next.resolve();
     }
-    throw new Error('runAll exceeded its guard — runaway loop?');
+    throw new Error('drive exceeded its guard — runaway loop?');
   }
+
+  const runAll = (): Promise<void> => drive(false);
+  /** Let stalled watchdogs fire, then settle all follow-up work. */
+  const expire = (): Promise<void> => drive(true);
 
   const phases: PhaseEvent[] = [];
   const outcomes: OutcomeCall[] = [];
@@ -99,6 +112,7 @@ function makeHarness() {
     delayCalls,
     captureStarts,
     runAll,
+    expire,
     /** Flush microtasks only — pending fake delays stay pending. */
     flush,
     queue: (...results: RecognizeResult[]) => recognizeQueue.push(...results),
@@ -300,6 +314,83 @@ describe('createSolveLoop', () => {
     expect(h.deps.recognize).toHaveBeenCalledTimes(1);
     expect(loop.getPhase(1)).toBe('verifying');
     expect(loop.getPhase(2)).toBe('idle');
+  });
+
+  it('watchdog: a round stalled at verifying fails the attempt after ROUND_STALL_MS', async () => {
+    const h = makeHarness();
+    h.queue(ok('s1'));
+    const loop = createSolveLoop(h.deps);
+
+    loop.onChallengeReady(1, 10, 7, 'grid', 'example.com');
+    await h.runAll();
+    expect(h.phaseNames()).toEqual(['solving', 'verifying']);
+    expect(h.delayCalls).toContain(ROUND_STALL_MS); // watchdog armed post-exec
+
+    // Nothing else ever arrives — the challenge frame is dead.
+    await h.expire();
+
+    expect(h.outcomes).toEqual([{ session: 's1', result: 'failed', rounds: 1 }]);
+    expect(h.phaseNames()).toEqual(['solving', 'verifying', 'error', 'idle']);
+    expect(loop.getPhase(1)).toBe('idle');
+
+    // Attempt cleared: a later CHALLENGE_GONE is a no-op.
+    loop.onChallengeGone(1);
+    await h.runAll();
+    expect(h.outcomes).toHaveLength(1);
+  });
+
+  it('watchdog: a timely CHALLENGE_READY disarms it — the next round proceeds without a spurious failure', async () => {
+    const h = makeHarness();
+    h.queue(ok('s1', [1, 3]), ok('s1', []));
+    const loop = createSolveLoop(h.deps);
+
+    loop.onChallengeReady(1, 10, 7, 'grid', 'example.com');
+    await h.runAll();
+
+    // Next round arrives well inside ROUND_STALL_MS.
+    loop.onChallengeReady(1, 10, 7, 'grid', 'example.com');
+    await h.runAll();
+    expect(h.phaseNames()).toEqual(['solving', 'verifying', 'solving', 'verifying']);
+
+    loop.onSolved(1, 3.1);
+    await h.expire(); // round 1's disarmed watchdog must do nothing when it elapses
+
+    expect(h.outcomes).toEqual([{ session: 's1', result: 'solved', rounds: 2 }]);
+    expect(h.phaseNames()).not.toContain('error');
+    expect(loop.getPhase(1)).toBe('idle');
+  });
+
+  it('watchdog: SOLVED disarms it', async () => {
+    const h = makeHarness();
+    h.queue(ok('s1'));
+    const loop = createSolveLoop(h.deps);
+
+    loop.onChallengeReady(1, 10, 7, 'grid', 'example.com');
+    await h.runAll();
+
+    loop.onSolved(1, 2.0);
+    await h.expire();
+
+    expect(h.outcomes).toEqual([{ session: 's1', result: 'solved', rounds: 1 }]);
+    expect(h.phaseNames()).toEqual(['solving', 'verifying', 'solved', 'idle']);
+    expect(loop.getPhase(1)).toBe('idle');
+  });
+
+  it('watchdog: onPaused mid-verifying — it never fires anything', async () => {
+    const h = makeHarness();
+    h.queue(ok('s1'));
+    const loop = createSolveLoop(h.deps);
+
+    loop.onChallengeReady(1, 10, 7, 'grid', 'example.com');
+    await h.runAll();
+    expect(loop.getPhase(1)).toBe('verifying');
+
+    loop.onPaused(1);
+    await h.expire();
+
+    expect(h.outcomes).toEqual([]);
+    expect(h.phaseNames()).toEqual(['solving', 'verifying']); // silence after the cancel
+    expect(loop.getPhase(1)).toBe('idle');
   });
 
   it('CHALLENGE_GONE after a started attempt reports failed once', async () => {

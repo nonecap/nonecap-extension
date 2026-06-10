@@ -59,6 +59,14 @@ export const CAPTURE_SPACING_MS = 600;
 export const TRANSIENT_RETRY_MS = 1500;
 /** How long the 'solved' / 'error' phases stay up before falling back to 'idle'. */
 export const PHASE_LINGER_MS = 4000;
+/**
+ * Watchdog for a concluded round: armed when EXEC finishes (phase
+ * 'verifying'). 20s comfortably covers hCaptcha's verify animation plus the
+ * next round's render; if no CHALLENGE_READY / SOLVED / CHALLENGE_GONE has
+ * arrived by then the challenge frame is dead and the attempt would
+ * otherwise hang at 'verifying' (and the on-page pill with it) forever.
+ */
+export const ROUND_STALL_MS = 20_000;
 
 type Token = { cancelled: boolean };
 
@@ -93,6 +101,8 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
   const phases = new Map<number, Phase>();
   /** Pending linger→idle transitions, cancellable per tab. */
   const lingerTokens = new Map<number, Token>();
+  /** Armed round watchdogs, cancellable per tab (see ROUND_STALL_MS). */
+  const watchdogTokens = new Map<number, Token>();
 
   /** Global capture serialization: one captureVisibleTab at a time, spaced. */
   let captureChain: Promise<unknown> = Promise.resolve();
@@ -124,8 +134,34 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
     });
   }
 
+  function cancelWatchdog(tabId: number): void {
+    const token = watchdogTokens.get(tabId);
+    if (token) token.cancelled = true;
+    watchdogTokens.delete(tabId);
+  }
+
+  /**
+   * Arm the post-exec stall watchdog. Disarmed by the next CHALLENGE_READY /
+   * SOLVED / CHALLENGE_GONE / onPaused (all of which either re-arm here or
+   * pass through clearAttempt). On fire — token-guarded and re-checked
+   * against the live attempt, like every other resumption point — the
+   * attempt is dead: report failed (if a round completed) and fail loud.
+   */
+  function armWatchdog(tabId: number, attempt: Attempt): void {
+    cancelWatchdog(tabId);
+    const token: Token = { cancelled: false };
+    watchdogTokens.set(tabId, token);
+    void deps.delay(ROUND_STALL_MS).then(() => {
+      if (token.cancelled) return;
+      watchdogTokens.delete(tabId);
+      if (attempts.get(tabId) !== attempt) return; // superseded meanwhile
+      failLoud(tabId, attempt, true);
+    });
+  }
+
   function clearAttempt(tabId: number, attempt: Attempt): void {
     attempt.token.cancelled = true;
+    cancelWatchdog(tabId);
     if (attempts.get(tabId) === attempt) attempts.delete(tabId);
   }
 
@@ -281,6 +317,7 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
     }
 
     setPhase(tabId, 'verifying');
+    armWatchdog(tabId, attempt);
   }
 
   function onChallengeReady(
@@ -291,6 +328,7 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
     host: string,
   ): void {
     cancelLinger(tabId);
+    cancelWatchdog(tabId); // the next round arrived in time — re-armed post-exec
 
     const existing = attempts.get(tabId);
     if (existing !== undefined) {
