@@ -16,5 +16,13 @@
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
-  "include": ["src", "scripts", "vite.config.ts", "manifest.config.ts", "vitest.config.ts"]
+  "include": [
+    "src",
+    "scripts",
+    "e2e",
+    "vite.config.ts",
+    "manifest.config.ts",
+    "vitest.config.ts",
+    "playwright.config.ts"
+  ]
 }

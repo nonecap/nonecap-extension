@@ -1,0 +1,32 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>NoneCap e2e fixture — hCaptcha test widget</title>
+    <!--
+      Real hCaptcha embed using the publisher test sitekey
+      10000000-ffff-ffff-ffff-000000000001 (hCaptcha's universal test key:
+      always serves a challenge, accepts any answer). Served over http://
+      by the spec's static server — content scripts do not reliably inject
+      into file:// pages.
+    -->
+    <script src="https://js.hcaptcha.com/1/api.js" async defer></script>
+    <style>
+      body {
+        font-family: system-ui, sans-serif;
+        display: grid;
+        place-items: center;
+        min-height: 100vh;
+        margin: 0;
+      }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>NoneCap extension e2e fixture</h1>
+      <form>
+        <div class="h-captcha" data-sitekey="10000000-ffff-ffff-ffff-000000000001"></div>
+      </form>
+    </main>
+  </body>
+</html>

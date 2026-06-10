@@ -14,7 +14,8 @@
     "build:ci": "vite build",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "package": "echo 'packaging is added in a later task'",
+    "e2e": "playwright test",
+    "package": "bun scripts/package.ts",
     "gen:icons": "bun scripts/gen-icons.ts",
     "mock-api": "bun scripts/mock-api.ts"
   },
@@ -23,6 +24,7 @@
   },
   "devDependencies": {
     "@crxjs/vite-plugin": "^2.5.0",
+    "@playwright/test": "^1.60.0",
     "@preact/preset-vite": "^2.10.5",
     "@types/chrome": "^0.1.43",
     "@types/node": "^24.0.0",

@@ -8,3 +8,4 @@ coverage/
 *.pem
 *.crx
 *.zip
+test-results/
