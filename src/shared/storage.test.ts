@@ -1,7 +1,15 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installChromeMock, type ChromeMock } from './test/chrome-mock';
 import { DEFAULT_SETTINGS } from './settings';
-import { getAll, get, set, subscribe, mergeSettings, type StorageShape } from './storage';
+import {
+  getAll,
+  get,
+  set,
+  subscribe,
+  mergeSettings,
+  updateSettings,
+  type StorageShape,
+} from './storage';
 
 let chromeMock: ChromeMock;
 
@@ -61,6 +69,24 @@ describe('get', () => {
   it('returns full defaults when stored settings are garbage', async () => {
     chromeMock.store['settings'] = 'corrupt';
     expect(await get('settings')).toEqual(DEFAULT_SETTINGS);
+  });
+});
+
+describe('updateSettings', () => {
+  it('reads (default-merged), applies the updater, writes, and returns the result', async () => {
+    chromeMock.store['settings'] = { autoSolve: false }; // partial on disk
+    const next = await updateSettings((s) => ({ ...s, pausedHosts: [...s.pausedHosts, 'a.example'] }));
+    expect(next).toEqual({ ...DEFAULT_SETTINGS, autoSolve: false, pausedHosts: ['a.example'] });
+    // Persisted value matches what was returned, fully merged.
+    expect(chromeMock.store['settings']).toEqual(next);
+    expect(await get('settings')).toEqual(next);
+  });
+
+  it('fires subscribe with the updated settings', async () => {
+    const cb = vi.fn();
+    subscribe(cb);
+    await updateSettings((s) => ({ ...s, grid: false }));
+    expect(cb).toHaveBeenCalledWith({ settings: { ...DEFAULT_SETTINGS, grid: false } });
   });
 });
 

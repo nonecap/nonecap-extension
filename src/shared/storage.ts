@@ -91,6 +91,18 @@ export async function set(partial: Partial<StorageShape>): Promise<void> {
 }
 
 /**
+ * Single read-modify-write helper for settings so callers don't improvise
+ * racy merges. Reads (default-merged), applies `fn`, writes, and returns
+ * the settings that were written.
+ */
+export async function updateSettings(fn: (s: Settings) => Settings): Promise<Settings> {
+  const current = await get('settings');
+  const next = fn(current);
+  await set({ settings: next });
+  return next;
+}
+
+/**
  * Subscribe to storage changes. The callback receives a typed partial with
  * the new values of the keys that changed (settings merged with defaults).
  * Returns an unsubscribe function.

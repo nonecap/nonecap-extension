@@ -45,6 +45,17 @@ export type Msg =
 /** Reply to GET_CHALLENGE_RECT. */
 export type ChallengeRectReply = { rect: RectLike; dpr: number } | null;
 
+/** Reply to EXEC. */
+export type ExecReply = { done: boolean };
+
+/** Reply to CONNECT_KEY. */
+export type ConnectKeyReply = { ok: boolean };
+
+/** Compile-time exhaustiveness guard for switches over Msg/ExtAction/Phase. */
+export function assertNever(x: never): never {
+  throw new Error(`Unexpected variant: ${JSON.stringify(x)}`);
+}
+
 /** Reply to GET_STATE: everything the popup needs to render every design state. */
 export type PopupState = {
   phase: Phase;

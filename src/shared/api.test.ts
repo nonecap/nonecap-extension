@@ -68,6 +68,13 @@ describe('error mapping', () => {
     if (!result.ok) expect(result.kind).toBe('network');
   });
 
+  it('maps an AbortSignal timeout to network with a timeout message', async () => {
+    chromeMock.store['extKey'] = EXT_KEY;
+    fetchMock.mockRejectedValueOnce(new DOMException('signal timed out', 'TimeoutError'));
+    const result = await recognize(recognizePayload);
+    expect(result).toEqual({ ok: false, kind: 'network', message: 'Request timed out' });
+  });
+
   it('maps malformed JSON on a 200 to server', async () => {
     chromeMock.store['extKey'] = EXT_KEY;
     fetchMock.mockResolvedValueOnce(new Response('definitely not json', { status: 200 }));
@@ -76,10 +83,10 @@ describe('error mapping', () => {
     if (!result.ok) expect(result.kind).toBe('server');
   });
 
-  it('fails with bad_key when no key is configured at all', async () => {
+  it('fails with no_key when no key is configured at all', async () => {
     const result = await recognize(recognizePayload);
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.kind).toBe('bad_key');
+    if (!result.ok) expect(result.kind).toBe('no_key');
     expect(fetchMock).not.toHaveBeenCalled();
   });
 });
@@ -212,6 +219,27 @@ describe('outcome', () => {
       result: 'solved',
       rounds: 2,
     });
+  });
+
+  it('retries with the ext key when the user key is dead (401) and marks usedFallback', async () => {
+    chromeMock.store['userKey'] = USER_KEY;
+    chromeMock.store['extKey'] = EXT_KEY;
+    fetchMock
+      .mockResolvedValueOnce(errorResponse(401, 'unauthorized'))
+      .mockResolvedValueOnce(jsonResponse(200, { ok: true }));
+    const result = await outcome({ session: 'extsess_9', result: 'failed' });
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(authHeaderOfCall(0)).toBe(`Bearer ${USER_KEY}`);
+    expect(authHeaderOfCall(1)).toBe(`Bearer ${EXT_KEY}`);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.usedFallback).toBe(true);
+  });
+
+  it('fails with no_key when no key is configured', async () => {
+    const result = await outcome({ session: 'extsess_9', result: 'solved' });
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.kind).toBe('no_key');
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 });
 

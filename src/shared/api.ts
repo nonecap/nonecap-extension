@@ -17,7 +17,10 @@ const DEFAULT_TIMEOUT_MS = 10_000;
 export type ApiErrorKind =
   | 'daily_limit'
   | 'no_credits'
+  /** The API rejected the key (401/403). */
   | 'bad_key'
+  /** No key in storage at all — callers should auto-register on this. */
+  | 'no_key'
   | 'rate_limited'
   | 'network'
   | 'server';
@@ -85,8 +88,14 @@ async function request<T>(
       body: opts.body === undefined ? undefined : JSON.stringify(opts.body),
       signal: AbortSignal.timeout(opts.timeoutMs),
     });
-  } catch {
-    return { ok: false, kind: 'network', message: 'Could not reach the NoneCap API', status: null };
+  } catch (e) {
+    const timedOut = e instanceof DOMException && e.name === 'TimeoutError';
+    return {
+      ok: false,
+      kind: 'network',
+      message: timedOut ? 'Request timed out' : 'Could not reach the NoneCap API',
+      status: null,
+    };
   }
 
   let json: unknown = null;
@@ -120,6 +129,16 @@ function strip<T>(result: InternalResult<T>): ApiResult<T> {
   return { ok: false, kind: result.kind, message: result.message };
 }
 
+/** Read both keys from storage; `key` is the preferred one (userKey ?? extKey). */
+async function selectKey(): Promise<{
+  userKey: string | null;
+  extKey: string | null;
+  key: string | null;
+}> {
+  const [userKey, extKey] = await Promise.all([storageGet('userKey'), storageGet('extKey')]);
+  return { userKey, extKey, key: userKey ?? extKey };
+}
+
 /**
  * Run an authenticated call with the preferred key (userKey ?? extKey).
  * If the call fails 401 while a userKey was used and an extKey exists,
@@ -130,9 +149,8 @@ function strip<T>(result: InternalResult<T>): ApiResult<T> {
 async function withKeyFallback<T>(
   call: (key: string) => Promise<InternalResult<T>>,
 ): Promise<ApiResult<T>> {
-  const [userKey, extKey] = await Promise.all([storageGet('userKey'), storageGet('extKey')]);
-  const key = userKey ?? extKey;
-  if (!key) return { ok: false, kind: 'bad_key', message: 'No API key configured' };
+  const { userKey, extKey, key } = await selectKey();
+  if (!key) return { ok: false, kind: 'no_key', message: 'No API key configured' };
 
   const first = await call(key);
   if (first.ok) return first;
@@ -167,18 +185,21 @@ export async function recognize(payload: RecognizePayload): Promise<ApiResult<Re
   );
 }
 
-/** Report the outcome of a solve session. */
+/**
+ * Report the outcome of a solve session. Same key fallback as recognize/stats:
+ * a 401 on the userKey retries once with the extKey so a dead user key can't
+ * silently drop outcome pings; a successful retry carries `usedFallback: true`
+ * so the caller can mark the user key invalid.
+ */
 export async function outcome(payload: OutcomePayload): Promise<ApiResult<OutcomeData>> {
-  const [userKey, extKey] = await Promise.all([storageGet('userKey'), storageGet('extKey')]);
-  const key = userKey ?? extKey;
-  if (!key) return { ok: false, kind: 'bad_key', message: 'No API key configured' };
-  const result = await request<OutcomeData>('/v1/ext/outcome', {
-    method: 'POST',
-    body: payload,
-    key,
-    timeoutMs: DEFAULT_TIMEOUT_MS,
-  });
-  return strip(result);
+  return withKeyFallback((key) =>
+    request<OutcomeData>('/v1/ext/outcome', {
+      method: 'POST',
+      body: payload,
+      key,
+      timeoutMs: DEFAULT_TIMEOUT_MS,
+    }),
+  );
 }
 
 /**

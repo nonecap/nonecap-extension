@@ -56,6 +56,10 @@ export function computeCropRect(
  * Crop a captured-tab data URL to the given CSS rect and return base64 PNG
  * WITHOUT the data-url prefix. The source rect is clamped against the actual
  * bitmap dimensions before drawing.
+ *
+ * Throws on: rect fully outside the bitmap, undecodable image data, or a
+ * missing OffscreenCanvas 2d context — callers must wrap in try/catch
+ * (unlike api.ts, exceptions DO cross this seam).
  */
 export async function cropDataUrl(
   dataUrl: string,
