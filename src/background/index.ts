@@ -286,6 +286,11 @@ chrome.runtime.onMessage.addListener(
       case 'DISCONNECT_KEY':
         void set({ userKey: null });
         return undefined;
+      case 'OPEN_OPTIONS':
+        // Web-origin pages can't navigate to non-web-accessible extension
+        // pages, so the pill's CTA delegates to the background.
+        void chrome.runtime.openOptionsPage();
+        return undefined;
       // bg → frame messages; never handled here.
       case 'GET_CHALLENGE_RECT':
       case 'EXEC':

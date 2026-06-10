@@ -37,6 +37,7 @@ export type Msg =
   | { t: 'EXEC'; action: ExtAction } // bg → challenge frame; reply: { done: boolean }
   | { t: 'PHASE'; phase: Phase; detail?: { secs?: string; credits?: number } } // bg → top frame + popup
   | { t: 'SOLVED'; secs: number } // top frame → bg
+  | { t: 'OPEN_OPTIONS' } // top frame → bg; no reply (content scripts cannot open extension pages)
   | { t: 'GET_STATE' } // popup → bg; reply: PopupState
   | { t: 'SET_PAUSE'; host: string; paused: boolean } // popup → bg
   | { t: 'CONNECT_KEY'; key: string } // popup → bg; reply: { ok: boolean }

@@ -54,10 +54,11 @@ function init(): void {
   const dark = (): boolean => blocklisted || paused;
 
   const pill = createPill(document, {
-    // Content scripts cannot open the popup — the "Add API key" CTA opens
-    // the options page instead.
+    // Content scripts cannot open the popup, and web-origin window.open to a
+    // non-web-accessible extension page is blocked — the "Add API key" CTA
+    // asks the background to open the options page instead.
     onCta: () => {
-      window.open(chrome.runtime.getURL('src/options/index.html'), '_blank');
+      send({ t: 'OPEN_OPTIONS' });
     },
   });
 
