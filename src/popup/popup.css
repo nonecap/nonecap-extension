@@ -1,0 +1,331 @@
+/* NoneCap popup — ported from the design prototype (extension-design/styles.css).
+   Tokens come from src/styles/tokens.css. */
+
+html,
+body {
+  overflow: hidden;
+}
+
+/* Shared brand mark */
+.nc-mark {
+  border-radius: 5px;
+  background: linear-gradient(135deg, #7c4dff 0%, #4e1ed1 100%);
+  position: relative;
+  flex-shrink: 0;
+  box-shadow: 0 0 0 1px rgba(105, 56, 239, 0.2);
+}
+.nc-mark::after {
+  content: "";
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  top: 18%;
+  height: 18%;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.85);
+}
+.nc-mark::before {
+  content: "";
+  position: absolute;
+  left: 18%;
+  right: 18%;
+  bottom: 18%;
+  height: 18%;
+  border-radius: 99px;
+  background: rgba(255, 255, 255, 0.45);
+}
+
+@keyframes capspin {
+  to { transform: rotate(360deg); }
+}
+@keyframes dotpulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+@keyframes popin {
+  from { opacity: 0; transform: translateY(-5px) scale(0.98); }
+  to { opacity: 1; transform: none; }
+}
+
+.popup {
+  width: 324px;
+  overflow: hidden;
+  background: var(--bg);
+  animation: popin 200ms cubic-bezier(0.22, 1, 0.36, 1) both;
+  font-size: 13px;
+}
+.pp-head {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  padding: 13px 14px 12px;
+  border-bottom: 1px solid var(--border);
+  background: #fff;
+}
+.pp-head .pp-name {
+  font-weight: 600;
+  font-size: 13.5px;
+  letter-spacing: -0.01em;
+  flex: 1;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+.pp-head .pp-ver {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--text-dim);
+}
+.pp-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 22px;
+  padding: 0 9px;
+  border-radius: 11px;
+  font-size: 11px;
+  font-weight: 500;
+}
+.pp-status .dot { width: 6px; height: 6px; border-radius: 50%; }
+.pp-status.on { background: var(--ok-bg); color: var(--ok); }
+.pp-status.on .dot { background: var(--ok); }
+.pp-status.off { background: var(--bg-3); color: var(--text-dim); }
+.pp-status.off .dot { background: var(--text-dim); }
+.pp-status.busy { background: var(--accent-soft); color: var(--accent); }
+.pp-status.busy .dot { background: var(--accent); animation: dotpulse 1s ease-in-out infinite; }
+.pp-gear {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 120ms ease, color 120ms ease;
+}
+.pp-gear:hover { background: var(--bg-3); color: var(--text); }
+
+.pp-body { padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+
+.pp-credits { display: flex; flex-direction: column; gap: 8px; }
+.pp-credits .row1 { display: flex; align-items: baseline; gap: 7px; }
+.pp-credits .big { font-size: 26px; font-weight: 600; letter-spacing: -0.03em; line-height: 1; }
+.pp-credits .big.zero { color: var(--warn); }
+.pp-credits .of { font-size: 12px; color: var(--text-muted); }
+.pp-credits .resets {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+}
+.pp-bar { height: 6px; border-radius: 3px; background: var(--bg-4); overflow: hidden; }
+.pp-bar i {
+  display: block;
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent);
+  transition: width 600ms cubic-bezier(0.22, 1, 0.36, 1);
+}
+.pp-bar i.low { background: var(--warn); }
+
+.pp-card {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fff;
+  padding: 11px 12px;
+}
+.pp-activity { display: flex; align-items: center; gap: 10px; }
+.pp-activity .a-spin {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  border: 2px solid var(--accent-soft-2);
+  border-top-color: var(--accent);
+  animation: capspin 700ms linear infinite;
+  flex-shrink: 0;
+}
+.pp-activity .a-check {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: var(--ok);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 9px;
+  flex-shrink: 0;
+}
+.pp-activity .a-text { flex: 1; min-width: 0; }
+.pp-activity .a-title { font-weight: 500; font-size: 12.5px; }
+.pp-activity .a-sub {
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pp-site { display: flex; align-items: center; gap: 10px; }
+.pp-site .s-fav {
+  width: 18px;
+  height: 18px;
+  border-radius: 5px;
+  background: var(--accent-soft-2);
+  flex-shrink: 0;
+}
+.pp-site .s-host { font-weight: 500; font-size: 12.5px; flex: 1; }
+.pp-site .s-sub { font-size: 11px; color: var(--text-dim); }
+
+.pp-toggle {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  border-radius: 10px;
+  background: var(--bg-4);
+  border: none;
+  flex-shrink: 0;
+  transition: background 160ms ease;
+}
+.pp-toggle::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  transition: transform 160ms ease;
+}
+.pp-toggle.on { background: var(--accent); }
+.pp-toggle.on::after { transform: translateX(14px); }
+.pp-toggle:disabled { cursor: default; opacity: 0.55; }
+
+.pp-warncard {
+  border: 1px solid rgba(161, 115, 20, 0.25);
+  border-radius: var(--radius);
+  background: var(--warn-bg);
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 9px;
+}
+.pp-warncard .w-title { font-weight: 600; font-size: 12.5px; color: var(--warn); }
+.pp-warncard .w-sub { font-size: 12px; color: var(--text-muted); line-height: 1.45; }
+
+.pp-keylink {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border: none;
+  background: transparent;
+  padding: 2px 1px;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--accent);
+  width: 100%;
+  text-align: left;
+}
+.pp-keylink:hover { color: var(--accent-2); }
+.pp-keyform { display: flex; gap: 7px; }
+.pp-keyform input {
+  flex: 1;
+  height: 34px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-2);
+  background: #fff;
+  padding: 0 10px;
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  outline: none;
+  min-width: 0;
+}
+.pp-keyform input:focus { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.pp-keyform input.bad { border-color: var(--danger); }
+.pp-btn {
+  height: 34px;
+  padding: 0 13px;
+  border-radius: var(--radius-sm);
+  border: none;
+  background: var(--accent);
+  color: #fff;
+  font-size: 12.5px;
+  font-weight: 600;
+  transition: background 140ms ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+}
+.pp-btn:hover { background: var(--accent-2); }
+.pp-btn.full { width: 100%; }
+.pp-key-hint { font-size: 11px; color: var(--text-dim); margin-top: 6px; }
+.pp-key-hint.err { color: var(--danger); }
+
+.pp-keychip { display: flex; align-items: center; gap: 9px; }
+.pp-keychip .k-icon {
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  background: var(--accent-soft);
+  color: var(--accent);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+}
+.pp-keychip .k-body { flex: 1; min-width: 0; }
+.pp-keychip .k-key { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; }
+.pp-keychip .k-plan { font-size: 10.5px; color: var(--text-dim); }
+.pp-keychip .k-remove {
+  border: none;
+  background: transparent;
+  color: var(--text-dim);
+  font-size: 11.5px;
+}
+.pp-keychip .k-remove:hover { color: var(--danger); }
+.pp-usage {
+  display: flex;
+  gap: 14px;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border);
+}
+.pp-usage .u { flex: 1; }
+.pp-usage .u b {
+  display: block;
+  font-size: 15px;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+}
+.pp-usage .u span { font-size: 10.5px; color: var(--text-dim); }
+
+.pp-paused-note {
+  font-size: 12px;
+  color: var(--text-muted);
+  line-height: 1.5;
+  padding: 2px 1px;
+}
+
+.pp-foot {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-2);
+}
+.pp-foot a {
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-weight: 500;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.pp-foot a:hover { color: var(--text); }
