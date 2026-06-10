@@ -1,0 +1,78 @@
+/* Synthetic cursor injected into the hCaptcha frame. Ported from the
+ * extension design (styles.css). Scoped under the [data-nonecap] root. */
+
+[data-nonecap].nc-root {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 2147483647;
+}
+
+.nc-root .nc-cursor {
+  position: absolute;
+  left: 0;
+  top: 0;
+  z-index: 2;
+  pointer-events: none;
+  opacity: 0;
+  will-change: transform;
+}
+
+.nc-root .nc-cursor .cur-inner {
+  position: relative;
+  transition: transform 120ms ease;
+}
+
+.nc-root .nc-cursor.pressing .cur-inner {
+  transform: scale(0.82);
+}
+
+.nc-root .nc-cursor .cur-glow {
+  position: absolute;
+  left: -17px;
+  top: -15px;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(105, 56, 239, 0.28) 0%, rgba(105, 56, 239, 0) 68%);
+  opacity: 0;
+  transition: opacity 300ms ease;
+}
+
+.nc-root .nc-cursor.glowing .cur-glow {
+  opacity: 1;
+}
+
+.nc-root .nc-cursor svg {
+  position: relative;
+  display: block;
+  filter: drop-shadow(0 2px 4px rgba(16, 16, 20, 0.35));
+}
+
+.nc-root .nc-ripple {
+  position: absolute;
+  z-index: 1;
+  pointer-events: none;
+  width: 44px;
+  height: 44px;
+  margin: -22px 0 0 -22px;
+  border-radius: 50%;
+  border: 2px solid #6938ef;
+  opacity: 0;
+  transform: scale(0.3);
+}
+
+.nc-root .nc-ripple.go {
+  animation: nc-ripple 480ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@keyframes nc-ripple {
+  0% {
+    opacity: 0.7;
+    transform: scale(0.25);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.1);
+  }
+}
