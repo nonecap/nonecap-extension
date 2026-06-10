@@ -6,6 +6,8 @@
  * the fallback order exactly as written.
  */
 
+import type { Geometry, Pt } from '../shared/messages';
+
 const CHECKBOX_SELECTORS = ['#checkbox', '[role=checkbox]', '#anchor', '.check'];
 const CONTAINER_SELECTORS = ['.challenge-container', '.interface-challenge', '.challenge'];
 const VERIFY_SELECTORS = ['.button-submit'];
@@ -117,4 +119,37 @@ export function findRefresh(doc: Document): Element | null {
 export function tileAt(doc: Document, n: number): Element | null {
   if (!Number.isInteger(n) || n < 1) return null;
   return doc.querySelectorAll('.task-image')[n - 1] ?? null;
+}
+
+/** Bounding-rect centre in this frame's CSS viewport coords. */
+export function centerOf(el: Element): Pt {
+  const r = el.getBoundingClientRect();
+  return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+}
+
+/**
+ * Challenge-frame geometry snapshot, the GET_GEOMETRY answer for the
+ * background's trusted-input driver. Every centre is in IFRAME-LOCAL CSS
+ * viewport coords (getBoundingClientRect already is — the background adds
+ * the iframe's top-frame rect origin). Null when this document is not a
+ * (rendered) challenge frame.
+ *
+ * `verify.isSkip` mirrors the Skip guard: the `.button-submit` element is
+ * reused for Verify/Next AND Skip — it reads "Skip" until an answer is
+ * placed, and clicking it then throws the challenge away. The centre is
+ * reported regardless so the background can re-check after acting.
+ */
+export function geometry(doc: Document): Geometry | null {
+  if (frameKind(doc) !== 'challenge') return null;
+  const tiles = [...doc.querySelectorAll('.task-image')].map(centerOf);
+  const verifyBtn = findVerify(doc);
+  const refreshBtn = findRefresh(doc);
+  return {
+    tiles,
+    verify:
+      verifyBtn === null
+        ? null
+        : { center: centerOf(verifyBtn), isSkip: findSubmitUnlessSkip(doc) === null },
+    refresh: refreshBtn === null ? null : centerOf(refreshBtn),
+  };
 }

@@ -1,13 +1,58 @@
 /**
- * Animated synthetic cursor rendered inside the hCaptcha frame.
+ * Animated cosmetic cursor rendered inside the hCaptcha frame.
  * Vanilla-TS port of the design reference (solver.jsx + styles.css).
+ *
+ * Purely visual: real input is dispatched by the background as trusted CDP
+ * events; the background sequences CURSOR ops (applyCursorOp) so this cursor
+ * animates in sync with them.
  *
  * No chrome.* here — index.ts reads settings and passes the speed in.
  */
 
-import type { Cursor } from './executor';
+import type { CursorOp, Pt } from '../shared/messages';
+import { assertNever } from '../shared/messages';
 import { moveDuration, ncTween, ncWait } from './tween';
 import cursorCss from './cursor.css?inline';
+
+/**
+ * What callers (synthetic checkbox click, CURSOR ops) need from the animated
+ * cursor. The concrete implementation is AnimatedCursor below; tests pass a
+ * no-op stub.
+ */
+export interface Cursor {
+  showAt(x: number, y: number): void;
+  moveTo(x: number, y: number): Promise<void>;
+  click(): Promise<void>;
+  press(): void;
+  release(): void;
+  hide(): void;
+  setGlow(on: boolean): void;
+  getPos(): Pt;
+}
+
+/**
+ * Apply one background-sequenced cosmetic op to the cursor. `move` without
+ * coordinates is a no-op (the background always sends them; a malformed
+ * message must not teleport the cursor to NaN).
+ */
+export async function applyCursorOp(cur: Cursor, op: CursorOp, x?: number, y?: number): Promise<void> {
+  switch (op) {
+    case 'move':
+      if (x !== undefined && y !== undefined) await cur.moveTo(x, y);
+      return;
+    case 'press':
+      cur.press();
+      return;
+    case 'release':
+      cur.release();
+      return;
+    case 'click':
+      await cur.click();
+      return;
+    default:
+      return assertNever(op);
+  }
+}
 
 const ARROW_SVG =
   '<svg width="21" height="24" viewBox="0 0 21 24">' +
@@ -114,5 +159,3 @@ export class AnimatedCursor implements Cursor {
     this.root.remove();
   }
 }
-
-export type { Cursor };

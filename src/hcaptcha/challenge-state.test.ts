@@ -30,18 +30,18 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-describe('post-exec re-arm probe', () => {
-  it('re-arms after exec when a SINGLE challenge stays ready (atomic round swap, no not-ready window)', () => {
+describe('post-action re-arm probe', () => {
+  it('re-arms after an action when a SINGLE challenge stays ready (atomic round swap, no not-ready window)', () => {
     document.body.innerHTML = SINGLE_HTML;
     const { controller, sends } = makeController();
 
     controller.tick();
     expect(sends).toEqual(['single']); // initial round announced
 
-    // EXEC runs and completes; the round swaps atomically — the DOM is never
-    // observed not-ready, which used to leave the edge disarmed forever.
-    controller.execStarted();
-    controller.execFinished();
+    // The background acts on the round (signalled via GET_GEOMETRY/CURSOR);
+    // the round swaps atomically — the DOM is never observed not-ready,
+    // which used to leave the edge disarmed forever.
+    controller.noteAction();
 
     // Poll ticks inside the floor window: nothing fires (verifying overlay
     // guard) and the edge stays disarmed.
@@ -62,8 +62,7 @@ describe('post-exec re-arm probe', () => {
     controller.tick();
     expect(sends).toEqual(['single']);
 
-    controller.execStarted();
-    controller.execFinished(); // probe armed
+    controller.noteAction(); // probe armed
 
     // Challenge closes → teardown (the CHALLENGE_GONE path)…
     document.body.innerHTML = '';
@@ -75,17 +74,15 @@ describe('post-exec re-arm probe', () => {
     expect(sends).toHaveLength(1);
   });
 
-  it('does not stack: a new exec restarts the probe instead of doubling it', () => {
+  it('does not stack: a new action restarts the probe instead of doubling it', () => {
     document.body.innerHTML = SINGLE_HTML;
     const { controller, sends } = makeController();
     controller.tick();
     expect(sends).toHaveLength(1);
 
-    controller.execStarted();
-    controller.execFinished();
+    controller.noteAction();
     vi.advanceTimersByTime(1000); // first probe mid-flight…
-    controller.execStarted(); // …superseded by the next exec
-    controller.execFinished();
+    controller.noteAction(); // …superseded by the next action signal
 
     // Old probe's floor (would be at t=2500) passes — nothing fires early.
     vi.advanceTimersByTime(2000);
@@ -102,8 +99,7 @@ describe('post-exec re-arm probe', () => {
     controller.tick();
     expect(sends).toEqual(['grid']);
 
-    controller.execStarted();
-    controller.execFinished();
+    controller.noteAction();
 
     // Grid rounds swap through a placeholder window: tiles lose their
     // background → observed not-ready → edge re-arms (normal path).
@@ -134,8 +130,7 @@ describe('post-exec re-arm probe', () => {
     controller.tick();
     expect(sends).toHaveLength(1);
 
-    controller.execStarted();
-    controller.execFinished();
+    controller.noteAction();
 
     // At the floor the overlay still hides the prompt → not ready → probe
     // stays active instead of giving up.
@@ -154,19 +149,25 @@ describe('post-exec re-arm probe', () => {
     expect(sends).toEqual(['single', 'single']);
   });
 
-  it('does not announce mid-exec even if a probe-like state occurs', () => {
+  it('heartbeats keep the probe floor pushed out — no re-announce mid-action', () => {
     document.body.innerHTML = SINGLE_HTML;
     const { controller, sends } = makeController();
     controller.tick();
     expect(sends).toHaveLength(1);
 
-    controller.execStarted();
-    vi.advanceTimersByTime(10_000);
-    controller.tick(); // still executing → no announcements
+    // A long background action: every GET_GEOMETRY answer / CURSOR op renews
+    // the probe (noteAction heartbeat). While signals keep arriving within
+    // the floor, the probe never fires and the edge stays disarmed.
+    for (let i = 0; i < 10; i++) {
+      controller.noteAction();
+      vi.advanceTimersByTime(1000);
+      controller.tick();
+    }
     expect(sends).toHaveLength(1);
 
-    controller.execFinished();
-    vi.advanceTimersByTime(2600); // probe floor after THIS exec
+    // Action over (no more heartbeats): the probe fires at the floor counted
+    // from the LAST signal.
+    vi.advanceTimersByTime(1600); // 1000 + 1600 > 2500 floor
     expect(sends).toHaveLength(2);
   });
 });

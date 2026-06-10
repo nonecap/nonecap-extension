@@ -1,11 +1,13 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it } from 'vitest';
 import {
+  centerOf,
   findCheckbox,
   findRefresh,
   findVerify,
   findSubmitUnlessSkip,
   frameKind,
+  geometry,
   gridReady,
   singleReady,
   taskHint,
@@ -169,6 +171,90 @@ describe('element finders', () => {
     setBody('<div class="refresh" id="bare"></div>');
     expect(findRefresh(document)?.id).toBe('bare');
     expect(findRefresh(setBody('<div class="challenge"></div>'))).toBeNull();
+  });
+});
+
+function mockRect(el: Element, x: number, y: number, w: number, h: number): void {
+  (el as HTMLElement).getBoundingClientRect = () =>
+    ({ x, y, left: x, top: y, width: w, height: h, right: x + w, bottom: y + h, toJSON: () => ({}) }) as DOMRect;
+}
+
+describe('centerOf', () => {
+  it('returns the bounding-rect centre in CSS viewport coords', () => {
+    setBody('<div id="el"></div>');
+    const el = document.querySelector('#el')!;
+    mockRect(el, 100, 50, 90, 60);
+    expect(centerOf(el)).toEqual({ x: 145, y: 80 });
+  });
+});
+
+describe('geometry', () => {
+  /** 3×3 grid with mocked layout; tile n centre = (55 + 100·col, 65 + 100·row). */
+  function buildChallenge(opts: { verify?: string | null; refresh?: boolean } = {}): void {
+    const verifyLabel = opts.verify === undefined ? 'Verify' : opts.verify;
+    setBody(gridTiles(9));
+    document.querySelectorAll('.task-image').forEach((tile, i) => {
+      mockRect(tile, 10 + (i % 3) * 100, 20 + Math.floor(i / 3) * 100, 90, 90);
+    });
+    const button = document.querySelector('.button-submit')!;
+    if (verifyLabel === null) button.remove();
+    else {
+      button.textContent = verifyLabel;
+      mockRect(button, 350, 400, 100, 40);
+    }
+    if (opts.refresh) {
+      const refresh = document.createElement('div');
+      refresh.className = 'refresh button';
+      document.querySelector('.challenge-container')!.appendChild(refresh);
+      mockRect(refresh, 10, 400, 30, 30);
+    }
+  }
+
+  it('returns tile centres in 1-based reading (DOM) order, iframe-local', () => {
+    buildChallenge({ refresh: true });
+    const geo = geometry(document)!;
+    expect(geo).not.toBeNull();
+    expect(geo.tiles).toHaveLength(9);
+    expect(geo.tiles[0]).toEqual({ x: 55, y: 65 }); // tile 1 (index 0)
+    expect(geo.tiles[1]).toEqual({ x: 155, y: 65 });
+    expect(geo.tiles[3]).toEqual({ x: 55, y: 165 }); // row 2 starts at tile 4
+    expect(geo.tiles[8]).toEqual({ x: 255, y: 265 }); // tile 9
+  });
+
+  it('reports the verify button centre with isSkip=false when it reads Verify', () => {
+    buildChallenge();
+    expect(geometry(document)!.verify).toEqual({ center: { x: 400, y: 420 }, isSkip: false });
+  });
+
+  it('still reports the centre but flags isSkip=true while the button reads Skip', () => {
+    buildChallenge({ verify: ' Skip ' });
+    expect(geometry(document)!.verify).toEqual({ center: { x: 400, y: 420 }, isSkip: true });
+  });
+
+  it('verify is null when the button is missing entirely', () => {
+    buildChallenge({ verify: null });
+    expect(geometry(document)!.verify).toBeNull();
+  });
+
+  it('refresh is the button centre when present, null when missing', () => {
+    buildChallenge({ refresh: true });
+    expect(geometry(document)!.refresh).toEqual({ x: 25, y: 415 });
+    buildChallenge();
+    expect(geometry(document)!.refresh).toBeNull();
+  });
+
+  it('has no tiles on a single (canvas) challenge but still reports the buttons', () => {
+    setBody('<div class="challenge"><canvas width="500"></canvas><button class="button-submit">Skip</button></div>');
+    mockRect(document.querySelector('.button-submit')!, 350, 400, 100, 40);
+    const geo = geometry(document)!;
+    expect(geo.tiles).toEqual([]);
+    expect(geo.verify).toEqual({ center: { x: 400, y: 420 }, isSkip: true });
+  });
+
+  it('is null for the anchor frame and for unrendered/unrelated documents', () => {
+    expect(geometry(setBody('<div id="anchor"><div id="checkbox"></div></div>'))).toBeNull();
+    expect(geometry(setBody(''))).toBeNull();
+    expect(geometry(setBody('<div class="something-else"></div>'))).toBeNull();
   });
 });
 

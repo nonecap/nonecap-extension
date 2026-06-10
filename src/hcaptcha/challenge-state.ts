@@ -1,13 +1,16 @@
 /**
  * Challenge-frame readiness state machine. Platform-pure (DOM + timers, no
- * chrome.*) and extracted from index.ts so the edge-trigger and the post-exec
- * re-arm probe are jsdom-testable.
+ * chrome.*) and extracted from index.ts so the edge-trigger and the
+ * post-action re-arm probe are jsdom-testable.
  *
  * CHALLENGE_READY is EDGE-triggered: announce once per ready state, re-arm on
  * a not-ready observation. That alone stalls on SINGLE challenges — they swap
  * their image ATOMICALLY between rounds (no placeholder window, unlike grids),
- * so `armed` would stay false forever after the first EXEC. The post-exec
- * re-arm probe closes that gap: after an EXEC completes, wait out a floor
+ * so `armed` would stay false forever after the first action. The post-action
+ * re-arm probe closes that gap: the background signals it is acting on this
+ * round via noteAction() (index.ts calls it for every answered GET_GEOMETRY
+ * and every CURSOR op — there is no in-frame EXEC anymore, the background
+ * dispatches trusted CDP input). After the LAST such signal, wait out a floor
  * (hCaptcha's brief verifying overlay), then — on the floor timeout or any
  * later relevant mutation — if the challenge is still present AND ready, the
  * round did not conclude (atomic swap or rejected answer; both need another
@@ -21,10 +24,14 @@ export type ChallengeController = {
   tick(): void;
   /** A relevant DOM mutation happened (resets the stability debounce). */
   onMutation(): void;
-  /** An EXEC is starting: pause announcements, cancel any pending probe. */
-  execStarted(): void;
-  /** An EXEC finished: disarm, then start the re-arm probe (one per exec). */
-  execFinished(): void;
+  /**
+   * The background is acting on this round (observed via an answered
+   * GET_GEOMETRY or a CURSOR op): disarm the ready edge and (re)start the
+   * post-action re-arm probe. Repeated calls are a heartbeat — the probe
+   * floor always runs from the LAST observed action message, so the probe
+   * cannot force a mid-action re-announce.
+   */
+  noteAction(): void;
   /** Challenge gone (CHALLENGE_GONE/pagehide): cancel probe, reset for next. */
   teardown(): void;
 };
@@ -36,7 +43,7 @@ export type ChallengeControllerOpts = {
   stableMsGrid?: number;
   stableMsSingle?: number;
   /**
-   * Post-exec probe floor. Must stay comfortably above hCaptcha's brief
+   * Post-action probe floor. Must stay comfortably above hCaptcha's brief
    * verifying overlay so the probe never captures a mid-submit frame.
    */
   rearmFloorMs?: number;
@@ -52,10 +59,9 @@ export function createChallengeController(opts: ChallengeControllerOpts): Challe
 
   /** May we announce the next ready state? Re-set by a not-ready observation. */
   let armed = true;
-  let executing = false;
   let lastDomChangeAt = 0;
 
-  // ---- post-exec re-arm probe (at most one, cancelled by teardown/exec) ----
+  // ---- post-action re-arm probe (at most one; restarts supersede) ----
   let probeActive = false;
   let probeFloorPassed = false;
   let probeTimer: ReturnType<typeof setTimeout> | null = null;
@@ -88,9 +94,9 @@ export function createChallengeController(opts: ChallengeControllerOpts): Challe
   }
 
   function evaluateProbe(): void {
-    if (!probeActive || executing) return;
+    if (!probeActive) return;
     // Not ready right now (e.g. overlay still up): stay active — any later
-    // relevant mutation re-evaluates until teardown or the next exec.
+    // relevant mutation re-evaluates until teardown or the next action.
     if (roundReady() === null) return;
     // Still present and ready after the floor: the round did not conclude.
     cancelProbe();
@@ -99,7 +105,6 @@ export function createChallengeController(opts: ChallengeControllerOpts): Challe
   }
 
   function tick(): void {
-    if (executing) return;
     const ready = roundReady();
     if (ready === null) {
       // Passing through not-ready re-arms the ready edge (the normal path,
@@ -123,17 +128,12 @@ export function createChallengeController(opts: ChallengeControllerOpts): Challe
       // rely on the floor timeout. After the floor, re-evaluate immediately.
       if (probeActive && probeFloorPassed) evaluateProbe();
     },
-    execStarted(): void {
-      executing = true;
-      cancelProbe();
-    },
-    execFinished(): void {
-      executing = false;
+    noteAction(): void {
       // Invalidate the previous ready state: the next CHALLENGE_READY fires
       // via not-ready→ready (grids) or via the probe (atomic single swaps).
       armed = false;
       lastDomChangeAt = Date.now();
-      startProbe();
+      startProbe(); // restart = heartbeat: floor runs from the LAST signal
     },
     teardown(): void {
       cancelProbe();

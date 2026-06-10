@@ -1,25 +1,33 @@
 /**
  * Content script for the hCaptcha frames (anchor + challenge).
  *
- * Runs in every frame on https://newassets.hcaptcha.com/*. Reports readiness
- * to the background hub and executes the actions it sends back. This is the
- * ONLY module under src/hcaptcha that touches chrome.* — detect.ts and
- * executor.ts stay platform-pure.
+ * Runs in every frame on https://newassets.hcaptcha.com/*. Since the
+ * trusted-input switch (docs/SOLVING-ARCHITECTURE.md) the challenge frame is
+ * a SENSOR + COSMETIC CURSOR HOST: all real challenge input is dispatched by
+ * the background as trusted CDP events — this script never dispatches real
+ * pointer events for the challenge. The anchor frame's "I am human" checkbox
+ * click stays a synthetic in-frame click by design (synthetic-click.ts).
+ *
+ * This is the ONLY module under src/hcaptcha that touches chrome.* —
+ * detect.ts, cursor.ts, challenge-state.ts and synthetic-click.ts stay
+ * platform-pure.
  *
  * Background protocol (src/shared/messages.ts):
- *   send CHECKBOX_SEEN      → reply { proceed: boolean }: gate for clicking
- *                             the checkbox locally (no reply ⇒ do NOT click)
- *   send CHALLENGE_READY    (edge-triggered, after DOM-stability debounce)
- *   send CHALLENGE_GONE     (container removed / frame unloading)
- *   recv EXEC { action }    → reply { done: boolean }
+ *   send CHECKBOX_SEEN   → reply { proceed: boolean }: gate for clicking
+ *                          the checkbox locally (no reply ⇒ do NOT click)
+ *   send CHALLENGE_READY (edge-triggered, after DOM-stability debounce)
+ *   send CHALLENGE_GONE  (container removed / frame unloading)
+ *   recv GET_GEOMETRY    → reply Geometry | null (sync DOM read; null from
+ *                          anchor/other frames)
+ *   recv CURSOR          → fire-and-forget cosmetic-cursor op (no reply)
  */
 
-import type { ExecReply, Msg } from '../shared/messages';
+import type { CursorOp, GeometryReply, Msg } from '../shared/messages';
 import { get } from '../shared/storage';
-import { findCheckbox, frameKind } from './detect';
+import { findCheckbox, frameKind, geometry } from './detect';
 import { createChallengeController } from './challenge-state';
-import { AnimatedCursor } from './cursor';
-import { clickElement, exec } from './executor';
+import { AnimatedCursor, applyCursorOp } from './cursor';
+import { clickElement } from './synthetic-click';
 import { ncWait } from './tween';
 
 declare global {
@@ -34,7 +42,6 @@ const POLL_MS = 250;
 // ---- state ----------------------------------------------------------------
 
 let cursor: AnimatedCursor | null = null;
-let executing = false;
 
 // anchor frame
 let checkboxAnnounced = false;
@@ -44,12 +51,21 @@ let sawContainer = false;
 let goneSent = false;
 
 /**
- * Edge-triggered readiness + post-exec re-arm probe (atomic single-challenge
+ * Edge-triggered readiness + post-action re-arm probe (atomic single-challenge
  * round swaps never pass through not-ready). Logic lives in challenge-state.ts.
+ * The probe is armed/heartbeaten from the message handler below: every
+ * answered GET_GEOMETRY and every CURSOR op means the background is acting on
+ * this round (this replaced the old in-frame EXEC finally-block trigger).
  */
 const challenge = createChallengeController({
   doc: document,
-  sendReady: (task) => send({ t: 'CHALLENGE_READY', task }),
+  sendReady: (task) => {
+    // New round: an interrupted background action (press without a matching
+    // release) must never leave the cosmetic cursor stuck pressed.
+    cursor?.release();
+    cursor?.hide();
+    send({ t: 'CHALLENGE_READY', task });
+  },
 });
 
 // ---- helpers ----------------------------------------------------------------
@@ -116,10 +132,27 @@ function tickAnchor(): void {
 function sendGone(): void {
   if (!sawContainer || goneSent) return;
   goneSent = true;
-  challenge.teardown(); // cancels the post-exec re-arm probe
-  cursor?.destroy();
+  challenge.teardown(); // cancels the post-action re-arm probe
+  cursor?.destroy(); // includes any stuck pressed state — next round starts fresh
   cursor = null;
   send({ t: 'CHALLENGE_GONE' });
+}
+
+/**
+ * Serialized cosmetic-cursor ops. CURSOR messages are fire-and-forget, so
+ * consecutive ops must queue behind the current animation instead of
+ * overlapping mid-tween.
+ */
+let cursorChain: Promise<void> = Promise.resolve();
+
+function enqueueCursorOp(op: CursorOp, x?: number, y?: number): void {
+  cursorChain = cursorChain
+    .then(async () => {
+      if (frameKind(document) !== 'challenge') return; // frame died while queued
+      const cur = ensureCursor(await speedFromSettings());
+      await applyCursorOp(cur, op, x, y);
+    })
+    .catch(() => undefined);
 }
 
 // ---- main loop ------------------------------------------------------------------
@@ -186,38 +219,37 @@ function init(): void {
     if (frameKind(document) === 'challenge' || sawContainer) sendGone();
   });
 
-  // ---- EXEC handler ----------------------------------------------------------
+  // ---- background → frame messages -----------------------------------------
 
   chrome.runtime.onMessage.addListener(
-    (msg: Msg, _sender, sendResponse: (reply: ExecReply) => void): boolean | undefined => {
-      if (!msg || msg.t !== 'EXEC') return undefined;
-      // Only the challenge frame executes actions.
-      if (frameKind(document) !== 'challenge') return undefined;
-      // One action at a time — a concurrent EXEC is rejected, never queued.
-      if (executing) {
-        sendResponse({ done: false });
-        return true;
-      }
-      void (async () => {
-        executing = true;
-        challenge.execStarted();
-        try {
-          const speed = await speedFromSettings();
-          const done = await exec(msg.action, ensureCursor(speed), speed);
-          sendResponse({ done });
-        } catch (err) {
-          console.debug('[nonecap] exec failed', err);
-          sendResponse({ done: false });
-        } finally {
-          executing = false;
-          // Disarm + start the re-arm probe: the next CHALLENGE_READY fires
-          // via not-ready→ready (grids) or via the probe when the challenge
-          // is still present and ready after the floor (atomic single swaps,
-          // rejected answers).
-          challenge.execFinished();
+    (msg: Msg, _sender, sendResponse: (reply: GeometryReply) => void): boolean | undefined => {
+      if (!msg) return undefined;
+
+      if (msg.t === 'GET_GEOMETRY') {
+        // Synchronous DOM read; null from anchor/other frames. No need to
+        // return true / keep the port open.
+        const geo = geometry(document);
+        if (geo !== null) {
+          // A geometry request means the background is acting on this round:
+          // disarm the ready edge and start the post-action re-arm probe
+          // (the old EXEC finally-block used to do this).
+          challenge.noteAction();
         }
-      })();
-      return true; // keep the message channel open for the async reply
+        sendResponse(geo);
+        return undefined;
+      }
+
+      if (msg.t === 'CURSOR') {
+        // Cosmetic only — the trusted input already happened/happens in the
+        // background. Coordinates are iframe-local, the cursor's own space.
+        if (frameKind(document) !== 'challenge') return undefined;
+        challenge.noteAction(); // heartbeat: keeps the probe floor behind the action
+        enqueueCursorOp(msg.op, msg.x, msg.y);
+        return undefined;
+      }
+
+      // All other Msg variants target the background / other frames.
+      return undefined;
     },
   );
 
