@@ -4,9 +4,9 @@
 
 A Chrome extension that automatically solves hCaptcha challenges using the [NoneCap](https://nonecap.com) API. Install it, browse normally, and captchas get clicked for you.
 
-**Status: pre-release.** Under active development, not yet on the Chrome Web Store. The scaffold builds and loads, but the solving features below are still being implemented.
+**Status: pre-release.** Feature complete and tested, not yet on the Chrome Web Store. You can build and load it from source today.
 
-## What it will do
+## What it does
 
 - 100 free solving credits per day, no account needed
 - Bring your own NoneCap API key for unlimited solving
