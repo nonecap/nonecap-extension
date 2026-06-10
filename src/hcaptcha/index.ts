@@ -18,8 +18,15 @@ import type { ExecReply, Msg } from '../shared/messages';
 import { get } from '../shared/storage';
 import { findCheckbox, frameKind, gridReady, singleReady, taskHint } from './detect';
 import { AnimatedCursor } from './cursor';
-import { dispatchClick, exec } from './executor';
+import { clickElement, exec } from './executor';
 import { ncWait } from './tween';
+
+declare global {
+  interface Window {
+    /** Double-init guard — re-injection must not install duplicate listeners. */
+    __ncHcaptcha?: boolean;
+  }
+}
 
 const POLL_MS = 250;
 const STABLE_MS_GRID = 300;
@@ -73,9 +80,7 @@ async function clickCheckbox(checkbox: Element): Promise<void> {
   // Enter from below-right of the checkbox, clamped to the (tiny) frame.
   cur.showAt(Math.min(window.innerWidth - 6, cx + 120), Math.min(window.innerHeight - 6, cy + 90));
   await ncWait(220 / speed);
-  await cur.moveTo(cx, cy);
-  dispatchClick(document, cx, cy, checkbox);
-  await cur.click();
+  await clickElement(document, cur, checkbox);
   await ncWait(400);
   cur.hide();
 }
@@ -128,6 +133,8 @@ function tickChallenge(): void {
 function sendGone(): void {
   if (!sawContainer || goneSent) return;
   goneSent = true;
+  cursor?.destroy();
+  cursor = null;
   send({ t: 'CHALLENGE_GONE' });
 }
 
@@ -176,51 +183,65 @@ function relevantMutation(records: MutationRecord[]): boolean {
   return false;
 }
 
-const observer = new MutationObserver((records) => {
-  if (!relevantMutation(records)) return;
-  lastDomChangeAt = Date.now();
-  scheduleTick();
-});
-observer.observe(document.documentElement, {
-  childList: true,
-  subtree: true,
-  attributes: true,
-  attributeFilter: ['style', 'class'],
-});
+function init(): void {
+  const observer = new MutationObserver((records) => {
+    if (!relevantMutation(records)) return;
+    lastDomChangeAt = Date.now();
+    scheduleTick();
+  });
+  observer.observe(document.documentElement, {
+    childList: true,
+    subtree: true,
+    attributes: true,
+    attributeFilter: ['style', 'class'],
+  });
 
-setInterval(tick, POLL_MS);
-tick();
+  setInterval(tick, POLL_MS);
+  tick();
 
-window.addEventListener('pagehide', () => {
-  if (frameKind(document) === 'challenge' || sawContainer) sendGone();
-});
+  window.addEventListener('pagehide', () => {
+    if (frameKind(document) === 'challenge' || sawContainer) sendGone();
+  });
 
-// ---- EXEC handler ------------------------------------------------------------
+  // ---- EXEC handler ----------------------------------------------------------
 
-chrome.runtime.onMessage.addListener(
-  (msg: Msg, _sender, sendResponse: (reply: ExecReply) => void): boolean | undefined => {
-    if (!msg || msg.t !== 'EXEC') return undefined;
-    // Only the challenge frame executes actions.
-    if (frameKind(document) !== 'challenge') return undefined;
-    void (async () => {
-      executing = true;
-      try {
-        const speed = await speedFromSettings();
-        const done = await exec(msg.action, ensureCursor(speed), speed);
-        sendResponse({ done });
-      } catch (err) {
-        console.debug('[nonecap] exec failed', err);
+  chrome.runtime.onMessage.addListener(
+    (msg: Msg, _sender, sendResponse: (reply: ExecReply) => void): boolean | undefined => {
+      if (!msg || msg.t !== 'EXEC') return undefined;
+      // Only the challenge frame executes actions.
+      if (frameKind(document) !== 'challenge') return undefined;
+      // One action at a time — a concurrent EXEC is rejected, never queued.
+      if (executing) {
         sendResponse({ done: false });
-      } finally {
-        executing = false;
-        // Invalidate the previous ready state: the next CHALLENGE_READY only
-        // fires after the DOM passes through not-ready and settles again.
-        armed = false;
-        lastDomChangeAt = Date.now();
+        return true;
       }
-    })();
-    return true; // keep the message channel open for the async reply
-  },
-);
+      void (async () => {
+        executing = true;
+        try {
+          const speed = await speedFromSettings();
+          const done = await exec(msg.action, ensureCursor(speed), speed);
+          sendResponse({ done });
+        } catch (err) {
+          console.debug('[nonecap] exec failed', err);
+          sendResponse({ done: false });
+        } finally {
+          executing = false;
+          // Invalidate the previous ready state: the next CHALLENGE_READY only
+          // fires after the DOM passes through not-ready and settles again.
+          armed = false;
+          lastDomChangeAt = Date.now();
+        }
+      })();
+      return true; // keep the message channel open for the async reply
+    },
+  );
 
-console.debug('[nonecap] hcaptcha frame script loaded');
+  console.debug('[nonecap] hcaptcha frame script loaded');
+}
+
+// Re-injection (extension reload, programmatic injection) must not install a
+// second observer/listener set — that would double-click every target.
+if (!window.__ncHcaptcha) {
+  window.__ncHcaptcha = true;
+  init();
+}
