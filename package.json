@@ -1,0 +1,34 @@
+{
+  "name": "nonecap-extension",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Chrome extension that auto-solves hCaptcha using the NoneCap API",
+  "license": "MIT",
+  "engines": {
+    "bun": ">=1.3"
+  },
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "build:ci": "vite build",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run",
+    "package": "echo 'packaging is added in a later task'",
+    "gen:icons": "bun scripts/gen-icons.ts"
+  },
+  "dependencies": {
+    "preact": "^10.29.2"
+  },
+  "devDependencies": {
+    "@crxjs/vite-plugin": "^2.5.0",
+    "@preact/preset-vite": "^2.10.5",
+    "@types/chrome": "^0.1.43",
+    "@types/node": "^24.0.0",
+    "@types/pngjs": "^6.0.5",
+    "pngjs": "^7.0.0",
+    "typescript": "^5.9.0",
+    "vite": "^7.3.5",
+    "vitest": "^4.1.8"
+  }
+}
