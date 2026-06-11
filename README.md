@@ -5,13 +5,13 @@
 <h1 align="center">NoneCap hCaptcha Auto Solver</h1>
 
 <p align="center">
-  <a href="https://github.com/0xd8d/nonecap-extension/actions/workflows/ci.yml"><img src="https://github.com/0xd8d/nonecap-extension/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
+  <a href="https://github.com/nonecap/nonecap-extension/actions/workflows/ci.yml"><img src="https://github.com/nonecap/nonecap-extension/actions/workflows/ci.yml/badge.svg" alt="CI"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
 A Chrome extension that solves hCaptcha challenges for you, powered by the [NoneCap](https://nonecap.com) API. Install it, browse normally, and captchas get clicked while you watch.
 
-**Status: pre-release.** Feature complete and tested, not yet on the Chrome Web Store. You can build and load it from source today, or grab the zip from the [latest release](https://github.com/0xd8d/nonecap-extension/releases).
+**Status: pre-release.** Feature complete and tested, not yet on the Chrome Web Store. You can build and load it from source today, or grab the zip from the [latest release](https://github.com/nonecap/nonecap-extension/releases).
 
 ## What it does
 
@@ -30,7 +30,7 @@ Chrome Web Store: coming soon. Until then, from source:
 2. Open `chrome://extensions` and enable "Developer mode"
 3. Click "Load unpacked" and select the `dist` folder
 
-Or download `nonecap-extension-v*.zip` from the [releases page](https://github.com/0xd8d/nonecap-extension/releases), unzip it, and load the folder the same way.
+Or download `nonecap-extension-v*.zip` from the [releases page](https://github.com/nonecap/nonecap-extension/releases), unzip it, and load the folder the same way.
 
 ## How it works
 
