@@ -12,12 +12,15 @@ import {
 } from './format';
 
 describe('KEY_RE', () => {
-  it.each(['nc_live_a1b2c3d4', 'nc_test_ABCDEFGH123', 'nc_live_' + 'x'.repeat(24)])(
-    'accepts %s',
-    (k) => {
-      expect(KEY_RE.test(k)).toBe(true);
-    },
-  );
+  it.each([
+    'nc_live_a1b2c3d4',
+    'nc_test_ABCDEFGH123',
+    'nc_live_' + 'x'.repeat(24),
+    'nc_live_jIO0oO0xKsm5TV_Htzg', // base64url body with an underscore
+    'nc_live_a1b2-c3d4_e5f6', // base64url body with both `-` and `_`
+  ])('accepts %s', (k) => {
+    expect(KEY_RE.test(k)).toBe(true);
+  });
 
   it.each([
     'nc_live_short1', // < 8 chars after prefix

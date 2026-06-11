@@ -8,8 +8,13 @@ import type { Phase } from '../shared/messages';
 /** Daily free-tier credit allowance shown in the popup. */
 export const FREE_DAILY_CREDITS = 100;
 
-/** Format of a user-connected NoneCap API key. */
-export const KEY_RE = /^nc_(live|test)_[A-Za-z0-9]{8,}$/;
+/**
+ * Format of a user-connected NoneCap API key: `nc_live_`/`nc_test_` + a
+ * base64url body, whose alphabet is `A-Za-z0-9` plus `-` and `_` (the API
+ * mints keys as base64url(random bytes) — see api-keys.ts). The body MUST
+ * allow `-`/`_` or a large fraction of valid keys are wrongly rejected.
+ */
+export const KEY_RE = /^nc_(live|test)_[A-Za-z0-9_-]{8,}$/;
 
 export const HINT_DEFAULT = 'Find your key in the NoneCap dashboard.';
 export const HINT_FORMAT = 'That doesn’t look like a NoneCap key (nc_live_…)';
