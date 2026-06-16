@@ -84,6 +84,16 @@ export function singleReady(doc: Document): boolean {
   return (prompt?.textContent ?? '').trim().length > 0;
 }
 
+/**
+ * The challenge instruction text (the teal prompt bar), trimmed. Empty string
+ * when absent. Sent with CHALLENGE_READY so the API can corroborate count-grid
+ * mode from the real DOM text instead of relying solely on the model's OCR.
+ */
+export function promptText(doc: Document): string {
+  const prompt = doc.querySelector(PROMPT_SELECTOR);
+  return (prompt?.textContent ?? '').trim();
+}
+
 /** The anchor frame's "I am human" checkbox. */
 export function findCheckbox(doc: Document): Element | null {
   return firstMatch(doc, CHECKBOX_SELECTORS);

@@ -246,11 +246,16 @@ async function performAction(
     case 'click_tiles': {
       const geo = await getGeometry(tabId, frameId);
       if (geo === null) return false;
-      for (const n of action.tiles) {
-        const center = geo.tiles[n - 1]; // 1-based reading order
+      for (let i = 0; i < action.tiles.length; i++) {
+        const center = geo.tiles[action.tiles[i]! - 1]; // 1-based reading order
         if (!center) continue; // best-effort, like the old executor
-        await clickLocal(center);
-        await actionPause();
+        // Count-based grid ("click each icon N times"): repeat the click.
+        // Default 1 when no counts array (classic select-once grid).
+        const times = Math.max(1, action.counts?.[i] ?? 1);
+        for (let k = 0; k < times; k++) {
+          await clickLocal(center);
+          await actionPause();
+        }
       }
       await clickVerifyUnlessSkip();
       return true;
@@ -372,7 +377,7 @@ async function handleChallengeReady(
     if (gate.reason === 'no-solves') sendPhaseToTab(tab.id, 'blocked');
     return;
   }
-  loop.onChallengeReady(tab.id, tab.windowId, frameId, msg.task, host);
+  loop.onChallengeReady(tab.id, tab.windowId, frameId, msg.task, host, msg.prompt);
 }
 
 async function assemblePopupState(): Promise<PopupState> {

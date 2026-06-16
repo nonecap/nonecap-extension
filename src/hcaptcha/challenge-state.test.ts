@@ -12,13 +12,21 @@ function gridHtml(): string {
   return html + '</div>';
 }
 
-function makeController(): { controller: ChallengeController; sends: string[] } {
+function makeController(): {
+  controller: ChallengeController;
+  sends: string[];
+  prompts: string[];
+} {
   const sends: string[] = [];
+  const prompts: string[] = [];
   const controller = createChallengeController({
     doc: document,
-    sendReady: (task) => sends.push(task),
+    sendReady: (task, prompt) => {
+      sends.push(task);
+      prompts.push(prompt);
+    },
   });
-  return { controller, sends };
+  return { controller, sends, prompts };
 }
 
 beforeEach(() => {
@@ -28,6 +36,18 @@ beforeEach(() => {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('prompt forwarding', () => {
+  it('passes the DOM prompt text alongside the task on announce', () => {
+    document.body.innerHTML = SINGLE_HTML;
+    const { controller, sends, prompts } = makeController();
+
+    controller.tick();
+
+    expect(sends).toEqual(['single']);
+    expect(prompts).toEqual(['Drag the ball']);
+  });
 });
 
 describe('post-action re-arm probe', () => {

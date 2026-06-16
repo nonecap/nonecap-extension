@@ -17,7 +17,7 @@
  * recognize round, capped by the background's MAX_ROUNDS), so force re-arm.
  */
 
-import { frameKind, gridReady, singleReady, taskHint } from './detect';
+import { frameKind, gridReady, promptText, singleReady, taskHint } from './detect';
 
 export type ChallengeController = {
   /** Poll/scheduled evaluation (the caller's 250ms loop + mutation ticks). */
@@ -38,7 +38,7 @@ export type ChallengeController = {
 
 export type ChallengeControllerOpts = {
   doc: Document;
-  sendReady: (task: 'grid' | 'single') => void;
+  sendReady: (task: 'grid' | 'single', prompt: string) => void;
   /** Stability debounce before announcing readiness. */
   stableMsGrid?: number;
   stableMsSingle?: number;
@@ -117,7 +117,7 @@ export function createChallengeController(opts: ChallengeControllerOpts): Challe
     if (Date.now() - lastDomChangeAt < stableMs) return; // mid-swap: wait for the DOM to settle
     armed = false;
     cancelProbe(); // this round is announced; the probe must not re-fire it
-    sendReady(ready);
+    sendReady(ready, promptText(doc));
   }
 
   return {

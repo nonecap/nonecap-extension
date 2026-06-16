@@ -24,6 +24,7 @@ export type LoopDeps = {
     task: 'grid' | 'single';
     host: string;
     session?: string | null;
+    instruction?: string;
   }): Promise<RecognizeResult>;
   /**
    * Perform the recognized action with trusted (CDP) input, animating the
@@ -83,6 +84,8 @@ type Attempt = {
   frameId: number;
   host: string;
   task: 'grid' | 'single';
+  /** Latest round's DOM instruction text, forwarded to recognize for count-grid corroboration. */
+  prompt: string | null;
   session: string | null;
   /** Completed rounds (a round counts once recognize succeeded). */
   rounds: number;
@@ -102,6 +105,7 @@ export type SolveLoop = {
     frameId: number,
     task: 'grid' | 'single',
     host: string,
+    prompt?: string,
   ): void;
   onSolved(tabId: number, secs: number): void;
   onChallengeGone(tabId: number): void;
@@ -275,7 +279,13 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
     }
     if (token.cancelled) return;
 
-    const payload = { image, task: attempt.task, host: attempt.host, session: attempt.session };
+    const payload = {
+      image,
+      task: attempt.task,
+      host: attempt.host,
+      session: attempt.session,
+      ...(attempt.prompt ? { instruction: attempt.prompt } : {}),
+    };
     let res = await deps.recognize(payload);
     if (token.cancelled) return;
 
@@ -345,6 +355,7 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
     frameId: number,
     task: 'grid' | 'single',
     host: string,
+    prompt?: string,
   ): void {
     cancelLinger(tabId);
     cancelWatchdog(tabId); // the next round arrived in time — re-armed post-action
@@ -362,6 +373,7 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
       existing.frameId = frameId;
       existing.task = task;
       existing.host = host;
+      existing.prompt = prompt ?? null;
       void runRound(tabId, existing, existing.token);
       return;
     }
@@ -371,6 +383,7 @@ export function createSolveLoop(deps: LoopDeps): SolveLoop {
       frameId,
       host,
       task,
+      prompt: prompt ?? null,
       session: null,
       rounds: 0,
       creditsSpent: 0,

@@ -178,6 +178,31 @@ describe('createSolveLoop', () => {
     expect(loop.getPhase(1)).toBe('idle');
   });
 
+  it('forwards the CHALLENGE_READY prompt to recognize as `instruction` (count-grid corroboration)', async () => {
+    const h = makeHarness();
+    h.queue(ok('s1', []));
+    const loop = createSolveLoop(h.deps);
+
+    loop.onChallengeReady(1, 10, 7, 'grid', 'example.com', 'Click each animal icon the exact number of times listed');
+    await h.runAll();
+
+    expect(h.deps.recognize).toHaveBeenCalledWith(
+      expect.objectContaining({ instruction: 'Click each animal icon the exact number of times listed' }),
+    );
+  });
+
+  it('omits `instruction` when no prompt was provided', async () => {
+    const h = makeHarness();
+    h.queue(ok('s1', []));
+    const loop = createSolveLoop(h.deps);
+
+    loop.onChallengeReady(1, 10, 7, 'grid', 'example.com');
+    await h.runAll();
+
+    const payload = (h.deps.recognize as ReturnType<typeof vi.fn>).mock.calls[0]![0];
+    expect(payload).not.toHaveProperty('instruction');
+  });
+
   it('gives up after MAX_ROUNDS: outcome failed, phase error then idle, state cleared', async () => {
     const h = makeHarness();
     for (let i = 0; i < MAX_ROUNDS; i++) h.queue(ok('s1'));

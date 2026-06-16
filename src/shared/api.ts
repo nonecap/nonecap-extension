@@ -37,6 +37,8 @@ export type RecognizePayload = {
   task: 'grid' | 'single';
   host: string;
   session?: string | null;
+  /** DOM-read challenge instruction; lets the API corroborate count-grid mode. */
+  instruction?: string;
 };
 
 export type RecognizeData = ExtAction & {

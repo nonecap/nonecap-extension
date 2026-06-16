@@ -59,12 +59,12 @@ let goneSent = false;
  */
 const challenge = createChallengeController({
   doc: document,
-  sendReady: (task) => {
+  sendReady: (task, prompt) => {
     // New round: an interrupted background action (press without a matching
     // release) must never leave the cosmetic cursor stuck pressed.
     cursor?.release();
     cursor?.hide();
-    send({ t: 'CHALLENGE_READY', task });
+    send({ t: 'CHALLENGE_READY', task, ...(prompt ? { prompt } : {}) });
   },
 });
 

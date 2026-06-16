@@ -9,6 +9,7 @@ import {
   frameKind,
   geometry,
   gridReady,
+  promptText,
   singleReady,
   taskHint,
 } from './detect';
@@ -79,6 +80,24 @@ describe('taskHint', () => {
   it('is single for 0 or 1 task images', () => {
     expect(taskHint(setBody(gridTiles(1)))).toBe('single');
     expect(taskHint(setBody('<div class="challenge-container"><canvas></canvas></div>'))).toBe('single');
+  });
+});
+
+describe('promptText', () => {
+  it('reads and trims the prompt-text instruction', () => {
+    expect(
+      promptText(setBody('<div class="challenge-container"><div class="prompt-text">  Click each animal icon  </div></div>')),
+    ).toBe('Click each animal icon');
+  });
+
+  it('falls back to the .challenge-prompt selector', () => {
+    expect(
+      promptText(setBody('<div class="challenge-container"><div class="challenge-prompt">Select all boats</div></div>')),
+    ).toBe('Select all boats');
+  });
+
+  it('is empty string when no prompt element exists', () => {
+    expect(promptText(setBody('<div class="challenge-container"></div>'))).toBe('');
   });
 });
 

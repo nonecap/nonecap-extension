@@ -11,7 +11,10 @@ export type Pt = { x: number; y: number };
 
 /** Action returned by the NoneCap API. Coordinates are normalized 0-1000 relative to the uploaded image. */
 export type ExtAction =
-  | { action: 'click_tiles'; tiles: number[] }
+  // `counts`, when present, is parallel to `tiles`: counts[i] is how many times
+  // to click tiles[i] (count-based grid — "click each icon N times"). Absent or
+  // shorter than `tiles` ⇒ default of one click per tile.
+  | { action: 'click_tiles'; tiles: number[]; counts?: number[] }
   | { action: 'click_points'; points: Pt[] }
   | { action: 'drag'; from: Pt; to: Pt; moves: { from: Pt; to: Pt }[] }
   | { action: 'refresh' };
@@ -53,7 +56,10 @@ export type CursorOp = 'move' | 'press' | 'release' | 'click';
 
 export type Msg =
   | { t: 'CHECKBOX_SEEN' } // anchor frame → bg
-  | { t: 'CHALLENGE_READY'; task: 'grid' | 'single' } // challenge frame → bg
+  // `prompt` is the challenge instruction text read from the frame DOM at
+  // ready time (piggybacked here to avoid a speculative GET_GEOMETRY before
+  // recognize — see index.ts). The API uses it to corroborate count-grid mode.
+  | { t: 'CHALLENGE_READY'; task: 'grid' | 'single'; prompt?: string } // challenge frame → bg
   | { t: 'CHALLENGE_GONE' } // challenge frame → bg
   | { t: 'GET_CHALLENGE_RECT' } // bg → top frame; reply: { rect: RectLike; dpr: number } | null
   | { t: 'GET_GEOMETRY' } // bg → challenge frame; reply: Geometry | null
