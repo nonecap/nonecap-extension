@@ -451,6 +451,14 @@ const IDLE_POPUP_STATE: PopupState = {
 
 chrome.runtime.onMessage.addListener(
   (raw: unknown, sender, sendResponse): boolean | undefined => {
+    // Only trust messages from this extension's own content scripts / pages.
+    // A foreign sender (another extension forwarding a message, or any stray
+    // sender) must never reach handlers that mutate stored credentials
+    // (CONNECT_KEY / DISCONNECT_KEY) or drive a debugger-attached solve.
+    // Content scripts injected by THIS extension carry sender.id ===
+    // chrome.runtime.id; anything else is dropped.
+    if (sender.id !== chrome.runtime.id) return undefined;
+
     const msg = raw as Msg;
     switch (msg.t) {
       case 'CHECKBOX_SEEN':

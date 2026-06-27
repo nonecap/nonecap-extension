@@ -19,6 +19,12 @@ export default defineManifest({
   // puzzles, which ignore synthetic content-script events
   // (docs/SOLVING-ARCHITECTURE.md). Attached only during an active solve.
   permissions: ['storage', 'tabs', 'alarms', 'debugger'],
+  // <all_urls> is REQUIRED, not lazy scoping: this is a general-purpose
+  // auto-solver that must detect and solve an hCaptcha embedded on ANY site the
+  // user visits (hCaptcha widgets are not confined to a known host list), and it
+  // attaches the debugger to that arbitrary tab to deliver trusted input. The
+  // hCaptcha asset frame itself is narrowed to https://newassets.hcaptcha.com/*
+  // in content_scripts below; only the page detector needs the broad match.
   host_permissions: ['<all_urls>'],
   action: {
     default_popup: 'src/popup/index.html',
