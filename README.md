@@ -34,6 +34,7 @@ no solver logic, so the packaged build is everything you need to run it.
 - Animated, human-like clicking inside the challenge
 - Solves image grids, drag puzzles, and point-on-image challenges
 - Per-site pause and a blocklist for sites where you never want it to run
+- Provisioning support for automation setups that use a fresh browser profile per run
 
 ## Install unpacked (optional)
 
@@ -43,6 +44,40 @@ Prefer to load it manually? Download `nonecap-extension-v*.zip` from the
 1. Unzip it
 2. Open `chrome://extensions` and enable "Developer mode"
 3. Click "Load unpacked" and select the unzipped folder
+
+## Automation / fresh browser profiles
+
+If you run the extension in an automation tool that launches a fresh browser profile per run, your API key won't survive between runs — it lives in per-profile extension storage. Pre-seed it with either channel (requires v0.3.3+):
+
+**Option 1 — `provision.json`** (unpacked installs): after unzipping, create a `provision.json` next to `manifest.json` (the zip includes a `provision.example.json` to copy):
+
+```json
+{ "key": "nc_live_yourkeyhere" }
+```
+
+You can also pre-configure settings:
+
+```json
+{
+  "key": "nc_live_yourkeyhere",
+  "settings": { "style": "fast", "showOverlay": false, "blocklist": ["example.com"] }
+}
+```
+
+The file is read when the extension starts. A malformed key rejects the whole file; unknown or mistyped settings fields are ignored.
+
+**Option 2 — provision URL** (any install, including Web Store): navigate the profile to
+
+```
+https://nonecap.com/ext/provision#nc_live_yourkeyhere
+```
+
+The key travels in the URL fragment, which never leaves the browser. A JSON payload like the one above works in the fragment too. Wait for the `#nonecap-provision-result[data-ok="true"]` element (or the page title `NoneCap provisioned`) before continuing, e.g. with Puppeteer:
+
+```js
+await page.goto('https://nonecap.com/ext/provision#' + apiKey);
+await page.waitForSelector('#nonecap-provision-result[data-ok="true"]');
+```
 
 ## Permissions
 
