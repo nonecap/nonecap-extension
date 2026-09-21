@@ -2,7 +2,7 @@
   <img src="public/icons/icon128.png" width="96" alt="NoneCap logo">
 </p>
 
-<h1 align="center">NoneCap hCaptcha Auto Solver</h1>
+<h1 align="center">NoneCap hCaptcha Solver</h1>
 
 <p align="center">
   <a href="https://chromewebstore.google.com/detail/kahepbmokpbbkfognbmimpmnlfibcolf"><img src="https://img.shields.io/chrome-web-store/v/kahepbmokpbbkfognbmimpmnlfibcolf?label=Chrome%20Web%20Store&logo=googlechrome&logoColor=white" alt="Chrome Web Store"></a>
@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-A Chrome extension that solves hCaptcha challenges for you, powered by the [NoneCap](https://nonecap.com) API. Install it, browse normally, and captchas get clicked while you watch.
+A Chrome extension that solves hCaptcha challenges in your browser for sites you are authorised to automate, powered by the [NoneCap](https://nonecap.com) API. Install it, and when a challenge appears it clicks the challenge for you. Use it on sites you own, operate, or are authorised to automate; see the [NoneCap terms](https://nonecap.com/terms/).
 
 ## Install
 
@@ -30,11 +30,11 @@ no solver logic, so the packaged build is everything you need to run it.
 ## What it does
 
 - 100 free solving credits per day, no account needed
-- Bring your own [NoneCap API key](https://dashboard.nonecap.com) for unlimited solving
-- Animated, human-like clicking inside the challenge
+- Bring your own [NoneCap API key](https://dashboard.nonecap.com) for higher limits
+- Animated clicking inside the challenge
 - Solves image grids, drag puzzles, and point-on-image challenges
 - Per-site pause and a blocklist for sites where you never want it to run
-- Provisioning support for automation setups that use a fresh browser profile per run
+- Provisioning support for test runners and CI that launch a fresh browser profile per run
 
 ## Install unpacked (optional)
 
@@ -45,9 +45,9 @@ Prefer to load it manually? Download `nonecap-extension-v*.zip` from the
 2. Open `chrome://extensions` and enable "Developer mode"
 3. Click "Load unpacked" and select the unzipped folder
 
-## Automation / fresh browser profiles
+## Test runners and CI
 
-If you run the extension in an automation tool that launches a fresh browser profile per run, your API key won't survive between runs — it lives in per-profile extension storage. Pre-seed it with either channel (requires v0.3.3+):
+If your end-to-end tests or CI jobs on your own sites launch a fresh browser profile per run, your API key won't survive between runs — it lives in per-profile extension storage. Pre-seed it with either channel (requires v0.3.3+):
 
 **Option 1 — `provision.json`** (unpacked installs): after unzipping, create a `provision.json` next to `manifest.json` (the zip includes a `provision.example.json` to copy):
 
@@ -95,6 +95,6 @@ The extension captures the challenge area of the screen, only while a challenge 
 
 ## Links
 
-- Chrome Web Store: [NoneCap — hCaptcha Auto Solver](https://chromewebstore.google.com/detail/kahepbmokpbbkfognbmimpmnlfibcolf)
+- Chrome Web Store: [NoneCap hCaptcha Solver](https://chromewebstore.google.com/detail/kahepbmokpbbkfognbmimpmnlfibcolf)
 - Website: [nonecap.com](https://nonecap.com)
 - Dashboard and API keys: [dashboard.nonecap.com](https://dashboard.nonecap.com)
