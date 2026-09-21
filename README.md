@@ -20,8 +20,7 @@ That's it — pin the extension, and it starts detecting and solving hCaptcha as
 
 ## Source availability
 
-To protect against abuse and to preserve our edge, the extension's source code is
-not published in this repository. Download the packaged, ready-to-load build from
+The extension's source code is not published in this repository. Download the packaged, ready-to-load build from
 the [latest release](https://github.com/nonecap/nonecap-extension/releases) instead.
 
 All captcha recognition runs on NoneCap's servers — the extension itself contains
