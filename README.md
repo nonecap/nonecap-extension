@@ -10,7 +10,7 @@
   <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg" alt="License: MIT"></a>
 </p>
 
-A Chrome extension that solves hCaptcha challenges for you, powered by the [NoneCap](https://nonecap.com) API. Install it, browse normally, and captchas get clicked while you watch.
+An [hCaptcha solver extension for Chrome](https://nonecap.com/extension/) that clicks through hCaptcha challenges for you, powered by the NoneCap [hCaptcha solver](https://nonecap.com/) API. Install it, browse normally, and captchas get clicked while you watch.
 
 ## Install
 
