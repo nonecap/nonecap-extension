@@ -23,9 +23,7 @@ That's it — pin the extension, and it starts detecting and solving hCaptcha as
 To protect against abuse and to preserve our edge, the extension's source code is
 not published in this repository. Download the packaged, ready-to-load build from
 the [latest release](https://github.com/nonecap/nonecap-extension/releases) instead.
-
-All captcha recognition runs on NoneCap's servers — the extension itself contains
-no solver logic, so the packaged build is everything you need to run it.
+The packaged build is everything you need to run it.
 
 ## What it does
 
@@ -83,15 +81,15 @@ await page.waitForSelector('#nonecap-provision-result[data-ok="true"]');
 
 The extension asks for more than most, so here is what each permission is for:
 
-- `<all_urls>` host access: detect hCaptcha widgets on whatever site you're on and capture the challenge area there.
-- `tabs`: screenshot the active tab so the challenge can be cropped out and sent for recognition.
-- `debugger`: dispatch trusted mouse input. hCaptcha's drag and point puzzles ignore synthetic events from content scripts, so this is the only way to solve them. Chrome shows a "started debugging this browser" banner during a solve; the extension attaches when a solve starts and detaches when it ends.
+- `<all_urls>` host access: detect hCaptcha widgets on whatever site you're on and solve the challenge there.
+- `tabs`: know which site the active tab is on (per-site pause, the popup).
+- `debugger`: solve the challenge inside the captcha frame. Chrome shows a "started debugging this browser" banner during a solve; the extension attaches when a solve starts and detaches when it ends.
 - `storage`: keep your API key, settings, and credit balance.
 - `alarms`: retry free-tier key registration if the first attempt fails.
 
 ## Privacy
 
-The extension captures the challenge area of the screen, only while a challenge is open. It also sends an anonymous outcome ping (solved or failed, plus the round count) so solve quality can be monitored. No browsing history and no page content are collected. Full policy: [nonecap.com/extension/privacy](https://nonecap.com/extension/privacy).
+The extension takes and sends no screenshot and no page content. It also sends an outcome ping (solved or failed, the round count, and, when a solve fails, the reason and a short error message) so solve quality can be monitored. With an API key connected, the ping is tied to your account. No browsing history is collected. Full policy: [nonecap.com/extension/privacy](https://nonecap.com/extension/privacy).
 
 ## Links
 
