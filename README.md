@@ -89,7 +89,7 @@ The extension asks for more than most, so here is what each permission is for:
 
 ## Privacy
 
-The extension takes and sends no screenshot and no page content. It also sends an anonymous outcome ping (solved or failed, plus the round count) so solve quality can be monitored. No browsing history is collected. Full policy: [nonecap.com/extension/privacy](https://nonecap.com/extension/privacy).
+The extension takes and sends no screenshot and no page content. It also sends an outcome ping (solved or failed, the round count, and, when a solve fails, the reason and a short error message) so solve quality can be monitored. With an API key connected, the ping is tied to your account. No browsing history is collected. Full policy: [nonecap.com/extension/privacy](https://nonecap.com/extension/privacy).
 
 ## Links
 
