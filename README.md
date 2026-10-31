@@ -96,3 +96,4 @@ The extension takes and sends no screenshot and no page content. It also sends a
 - Chrome Web Store: [NoneCap — hCaptcha Auto Solver](https://chromewebstore.google.com/detail/kahepbmokpbbkfognbmimpmnlfibcolf)
 - Website: [nonecap.com](https://nonecap.com)
 - Dashboard and API keys: [dashboard.nonecap.com](https://dashboard.nonecap.com)
+- Proxy provider that works with NoneCap: [Roundproxies](https://roundproxies.com)
